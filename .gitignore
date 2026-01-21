@@ -1,7 +1,7 @@
 # Binaries
 *.exe
 *.exe~
-*. dll
+*.dll
 *.so
 *.dylib
 bin/
@@ -11,7 +11,7 @@ build/
 *.test
 
 # Output of go coverage
-*. out
+*.out
 coverage.html
 
 # Dependency directories
@@ -20,7 +20,7 @@ vendor/
 # IDE
 .idea/
 .vscode/
-*. swp
+*.swp
 *.swo
 
 # Environment files
@@ -39,7 +39,7 @@ Thumbs.db
 # Frontend
 web/node_modules/
 web/dist/
-web/. env. local
+web/.env.local
 
 # Temporary files
 tmp/

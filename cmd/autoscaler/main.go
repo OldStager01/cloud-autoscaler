@@ -13,7 +13,7 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		fmt. Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -25,7 +25,7 @@ func run() error {
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		return fmt. Errorf("failed to load config: %w", err)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -36,16 +36,15 @@ func run() error {
 
 	// Connect to database
 	fmt.Printf("Connecting to database at %s:%d/%s...\n",
-		cfg.Database.Host, cfg.Database.Port, cfg. Database.Name)
+		cfg.Database.Host, cfg.Database.Port, cfg.Database.Name)
 
-	db, err := database.New(cfg. Database. ToDBConfig())
+	db, err := database.New(cfg.Database.ToDBConfig())
 	if err != nil {
-		return fmt.Errorf("failed to connect to database:  %w", err)
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 	defer db.Close()
 
-	fmt. Println("Database connection established")
-
+	fmt.Println("Database connection established")
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -54,7 +53,7 @@ func run() error {
 		fmt.Println("Running database migrations...")
 		migrator := database.NewMigrator(db)
 		if err := migrator.Run(ctx); err != nil {
-			return fmt. Errorf("migration failed: %w", err)
+			return fmt.Errorf("migration failed: %w", err)
 		}
 		fmt.Println("Migrations completed successfully")
 	}
