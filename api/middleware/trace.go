@@ -11,7 +11,7 @@ func TraceID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		traceID := c.GetHeader(TraceIDHeader)
 		if traceID == "" {
-			traceID = uuid. New().String()
+			traceID = uuid.New().String()
 		}
 
 		c.Set("trace_id", traceID)
