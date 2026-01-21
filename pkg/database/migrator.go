@@ -45,7 +45,7 @@ func (m *Migrator) getMigrationFiles() ([]string, error) {
 
 	var files []string
 	for _, entry := range entries {
-		if ! entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
 			files = append(files, entry.Name())
 		}
 	}

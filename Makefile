@@ -52,7 +52,7 @@ test:
 ## test-coverage: Run tests with coverage
 test-coverage:
 	$(GOTEST) -v -coverprofile=coverage.out ./...
-	$(GOCMD) tool cover -html=coverage.out -o coverage. html
+	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 
 ## clean: Clean build artifacts
 clean: 
@@ -66,7 +66,7 @@ lint:
 
 ## fmt: Format code
 fmt:
-	$(GOFMT) ./... 
+	$(GOFMT) ./...
 	$(GOVET) ./...
 
 ## deps: Download dependencies
@@ -83,7 +83,7 @@ db-down:
 
 ## db-down-v: Stop database container and remove volumes
 db-down-v:
-	docker compose -f deployments/docker-compose. yml down -v
+	docker compose -f deployments/docker-compose.yml down -v
 
 ## db-logs: View database logs
 db-logs:
@@ -99,7 +99,7 @@ docker-up:
 
 ## docker-down: Stop all services
 docker-down:
-	docker compose -f deployments/docker-compose. yml down -v
+	docker compose -f deployments/docker-compose.yml down -v
 
 ## migrate:  Run database migrations
 migrate:

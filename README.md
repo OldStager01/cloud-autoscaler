@@ -57,5 +57,5 @@ cloud-autoscaler/
 go run cmd/autoscaler/main.go
 
 # Run simulator
-go run cmd/simulator/main. go
+go run cmd/simulator/main.go
 ````
