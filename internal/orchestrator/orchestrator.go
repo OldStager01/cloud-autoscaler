@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/OldStager01/cloud-autoscaler/internal/analyzer"
 	"github.com/OldStager01/cloud-autoscaler/internal/collector"
 	"github.com/OldStager01/cloud-autoscaler/internal/decision"
 	"github.com/OldStager01/cloud-autoscaler/internal/events"
 	"github.com/OldStager01/cloud-autoscaler/internal/logger"
+	"github.com/OldStager01/cloud-autoscaler/internal/resilience"
 	"github.com/OldStager01/cloud-autoscaler/internal/scaler"
 	"github.com/OldStager01/cloud-autoscaler/pkg/config"
 	"github.com/OldStager01/cloud-autoscaler/pkg/database"
@@ -25,8 +27,10 @@ type Orchestrator struct {
 	mu             sync.RWMutex
 	ctx            context.Context
 	cancel         context.CancelFunc
+	wg             sync.WaitGroup
 	analyzerConfig analyzer.Config
 	decisionConfig decision.Config
+	started        bool
 }
 
 func New(cfg *config.Config, db *database.DB) *Orchestrator {
@@ -34,7 +38,6 @@ func New(cfg *config.Config, db *database.DB) *Orchestrator {
 
 	eventBus := events.NewEventBus(100)
 
-	// Subscribe event logger to all events
 	allEvents := eventBus.SubscribeAll()
 	eventLogger := events.NewEventLogger(db, allEvents)
 
@@ -58,36 +61,75 @@ func New(cfg *config.Config, db *database.DB) *Orchestrator {
 
 	return &Orchestrator{
 		config:         cfg,
-		db:             db,
+		db:              db,
 		eventBus:       eventBus,
 		eventLogger:    eventLogger,
-		pipelines:       make(map[string]*Pipeline),
+		pipelines:      make(map[string]*Pipeline),
 		ctx:            ctx,
-		cancel:         cancel,
+		cancel:          cancel,
 		analyzerConfig: analyzerCfg,
 		decisionConfig: decisionCfg,
 	}
 }
 
 func (o *Orchestrator) Start() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if o.started {
+		return nil
+	}
+
 	logger.Info("Orchestrator starting")
 	o.eventLogger.Start()
+	o.started = true
+
 	return nil
 }
 
-func (o *Orchestrator) Stop() {
-	logger.Info("Orchestrator stopping")
-
-	// Stop all pipelines
+func (o *Orchestrator) Stop(ctx context.Context) error {
 	o.mu.Lock()
-	for clusterID, pipeline := range o.pipelines {
-		logger.Infof("Stopping pipeline for cluster %s", clusterID)
-		pipeline.Stop()
+	if !o.started {
+		o.mu.Unlock()
+		return nil
 	}
+	o.started = false
 	o.mu.Unlock()
 
-	// Cancel context
+	logger.Info("Orchestrator stopping")
+
+	// Stop all pipelines concurrently
+	var wg sync.WaitGroup
+	o.mu.RLock()
+	for clusterID, pipeline := range o.pipelines {
+		wg.Add(1)
+		go func(id string, p *Pipeline) {
+			defer wg.Done()
+			logger.Infof("Stopping pipeline for cluster %s", id)
+			p.Stop()
+		}(clusterID, pipeline)
+	}
+	o.mu.RUnlock()
+
+	// Wait for pipelines or context timeout
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		logger.Info("All pipelines stopped")
+	case <-ctx.Done():
+		logger.Warn("Timeout waiting for pipelines to stop")
+	}
+
+	// Cancel main context
 	o.cancel()
+
+	// Wait for orchestrator goroutines
+	o.wg.Wait()
 
 	// Stop event logger
 	o.eventLogger.Stop()
@@ -96,6 +138,7 @@ func (o *Orchestrator) Stop() {
 	o.eventBus.Close()
 
 	logger.Info("Orchestrator stopped")
+	return nil
 }
 
 func (o *Orchestrator) StartCluster(cluster *models.Cluster, coll collector.Collector, scal scaler.Scaler) error {
@@ -106,10 +149,31 @@ func (o *Orchestrator) StartCluster(cluster *models.Cluster, coll collector.Coll
 		return fmt.Errorf("pipeline already exists for cluster %s", cluster.ID)
 	}
 
+	// Wrap collector with resilience
+	resilientColl := collector.NewResilientCollector(collector.ResilientCollectorConfig{
+		Collector:     coll,
+		MaxFailures:   o.config.Collector.CircuitBreaker.MaxFailures,
+		Timeout:       o.config.Collector.CircuitBreaker.Timeout,
+		RetryAttempts: o.config.Collector.RetryAttempts,
+		OnStateChange: func(name string, from, to resilience.State) {
+			logger.WithCluster(cluster.ID).Warnf(
+				"Circuit breaker %s:  %s -> %s", name, from, to,
+			)
+			if to == resilience.StateOpen {
+				events.NewPublisher(o.eventBus).Alert(
+					cluster.ID,
+					models.SeverityWarning,
+					"Circuit breaker opened for collector",
+					map[string]interface{}{"from": from.String(), "to": to.String()},
+				)
+			}
+		},
+	})
+
 	pipeline := NewPipeline(PipelineConfig{
-		ClusterID:        cluster.ID,
+		ClusterID:         cluster.ID,
 		CollectInterval:  o.config.Collector.Interval,
-		Collector:        coll,
+		Collector:        resilientColl,
 		Analyzer:         analyzer.New(o.analyzerConfig),
 		SustainedTracker: analyzer.NewSustainedTracker(),
 		DecisionEngine:   decision.NewEngine(o.decisionConfig),
@@ -144,6 +208,41 @@ func (o *Orchestrator) StopCluster(clusterID string) error {
 	return nil
 }
 
+func (o *Orchestrator) StartAllClusters(clusters []*models.Cluster, collectorFactory func(string) collector.Collector, scalerFactory func(string) scaler.Scaler) error {
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(clusters))
+
+	for _, cluster := range clusters {
+		if cluster.Status != models.ClusterStatusActive {
+			continue
+		}
+
+		wg.Add(1)
+		go func(c *models.Cluster) {
+			defer wg.Done()
+			coll := collectorFactory(c.ID)
+			scal := scalerFactory(c.ID)
+			if err := o.StartCluster(c, coll, scal); err != nil {
+				errChan <- fmt.Errorf("cluster %s:  %w", c.ID, err)
+			}
+		}(cluster)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	var errs []error
+	for err := range errChan {
+		errs = append(errs, err)
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to start %d clusters: %v", len(errs), errs)
+	}
+
+	return nil
+}
+
 func (o *Orchestrator) GetClusterStatus(clusterID string) (bool, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
@@ -169,10 +268,22 @@ func (o *Orchestrator) ListRunningClusters() []string {
 	return clusters
 }
 
+func (o *Orchestrator) ClusterCount() int {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return len(o.pipelines)
+}
+
 func (o *Orchestrator) SubscribeEvents(eventType models.EventType) <-chan *models.Event {
 	return o.eventBus.Subscribe(eventType)
 }
 
 func (o *Orchestrator) SubscribeAllEvents() <-chan *models.Event {
 	return o.eventBus.SubscribeAll()
+}
+
+func (o *Orchestrator) WaitForShutdown(timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return o.Stop(ctx)
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/OldStager01/cloud-autoscaler/internal/decision"
 	"github.com/OldStager01/cloud-autoscaler/internal/events"
 	"github.com/OldStager01/cloud-autoscaler/internal/logger"
+	"github.com/OldStager01/cloud-autoscaler/internal/metrics"
 	"github.com/OldStager01/cloud-autoscaler/internal/scaler"
 	"github.com/OldStager01/cloud-autoscaler/pkg/models"
 )
@@ -33,6 +34,7 @@ type Pipeline struct {
 	wg       sync.WaitGroup
 	running  bool
 	mu       sync.Mutex
+	metrics  *metrics.Metrics
 }
 
 func NewPipeline(cfg PipelineConfig) *Pipeline {
@@ -44,8 +46,9 @@ func NewPipeline(cfg PipelineConfig) *Pipeline {
 
 	return &Pipeline{
 		config:  cfg,
-		ctx:    ctx,
-		cancel: cancel,
+		ctx:     ctx,
+		cancel:  cancel,
+		metrics: metrics.Get(),
 	}
 }
 
@@ -92,14 +95,13 @@ func (p *Pipeline) run() {
 	ticker := time.NewTicker(p.config.CollectInterval)
 	defer ticker.Stop()
 
-	// Run immediately on start
 	p.runCycle()
 
 	for {
 		select {
 		case <-p.ctx.Done():
 			return
-		case <-ticker.C: 
+		case <-ticker.C:
 			p.runCycle()
 		}
 	}
@@ -112,15 +114,22 @@ func (p *Pipeline) runCycle() {
 	clusterID := p.config.ClusterID
 
 	// Step 1: Collect metrics
-	metrics, err := p.collect(ctx)
+	collectStart := time.Now()
+	metricsData, err := p.collect(ctx)
+	p.metrics.SetCollectionLatency(clusterID, time.Since(collectStart))
+
 	if err != nil {
 		logger.WithCluster(clusterID).Errorf("Collection failed: %v", err)
 		p.config.EventPublisher.Error(clusterID, "Metric collection failed", err)
+		p.metrics.IncCollectionErrors(clusterID)
 		return
 	}
+	p.metrics.IncCollections(clusterID)
 
 	// Step 2: Analyze metrics
-	analyzed := p.analyze(metrics)
+	analyzed := p.analyze(metricsData)
+	p.metrics.SetCPU(clusterID, analyzed.AvgCPU)
+	p.metrics.SetMemory(clusterID, analyzed.AvgMemory)
 
 	// Step 3: Get current cluster state
 	state, err := p.config.Scaler.GetClusterState(ctx, clusterID)
@@ -129,32 +138,36 @@ func (p *Pipeline) runCycle() {
 		p.config.EventPublisher.Error(clusterID, "Failed to get cluster state", err)
 		return
 	}
+	p.metrics.SetServerCount(clusterID, state.ActiveServers)
 
 	// Step 4: Make scaling decision
+	decisionStart := time.Now()
 	scalingDecision := p.decide(analyzed, state)
+	p.metrics.SetDecisionLatency(clusterID, time.Since(decisionStart))
+	p.metrics.IncDecision(clusterID, string(scalingDecision.Action))
 
 	// Step 5: Execute scaling if needed
 	if scalingDecision.ShouldExecute() {
 		p.execute(ctx, scalingDecision)
+		p.metrics.IncScalingEvent(clusterID, string(scalingDecision.Action))
 	}
 }
 
 func (p *Pipeline) collect(ctx context.Context) (*models.ClusterMetrics, error) {
-	metrics, err := p.config.Collector.Collect(ctx, p.config.ClusterID)
+	metricsData, err := p.config.Collector.Collect(ctx, p.config.ClusterID)
 	if err != nil {
 		return nil, err
 	}
 
-	p.config.EventPublisher.MetricCollected(p.config.ClusterID, metrics)
-	return metrics, nil
+	p.config.EventPublisher.MetricCollected(p.config.ClusterID, metricsData)
+	return metricsData, nil
 }
 
-func (p *Pipeline) analyze(metrics *models.ClusterMetrics) *models.AnalyzedMetrics {
-	analyzed := p.config.Analyzer.Analyze(metrics)
+func (p *Pipeline) analyze(metricsData *models.ClusterMetrics) *models.AnalyzedMetrics {
+	analyzed := p.config.Analyzer.Analyze(metricsData)
 	p.config.SustainedTracker.Update(p.config.ClusterID, analyzed, p.config.AnalyzerConfig)
 	p.config.EventPublisher.MetricAnalyzed(p.config.ClusterID, analyzed)
 
-	// Check for alert conditions
 	if analyzed.IsCritical() {
 		p.config.EventPublisher.Alert(
 			p.config.ClusterID,
@@ -168,7 +181,6 @@ func (p *Pipeline) analyze(metrics *models.ClusterMetrics) *models.AnalyzedMetri
 }
 
 func (p *Pipeline) decide(analyzed *models.AnalyzedMetrics, state *models.ClusterState) *models.ScalingDecision {
-	// TODO: Add prediction support later
 	scalingDecision := p.config.DecisionEngine.Decide(analyzed, nil, state)
 	p.config.EventPublisher.DecisionMade(p.config.ClusterID, scalingDecision)
 	return scalingDecision
@@ -196,10 +208,8 @@ func (p *Pipeline) execute(ctx context.Context, scalingDecision *models.ScalingD
 		return
 	}
 
-	// Record scaling for cooldown
 	p.config.DecisionEngine.RecordScaling(clusterID)
 
-	// Create scaling event record
 	status := models.ScalingEventSuccess
 	if result.PartialSuccess {
 		status = models.ScalingEventPartial
