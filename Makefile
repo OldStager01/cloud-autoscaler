@@ -100,3 +100,11 @@ docker-up:
 ## docker-down: Stop all services
 docker-down:
 	docker compose -f deployments/docker-compose. yml down -v
+
+## migrate:  Run database migrations
+migrate:
+	$(GORUN) ./cmd/autoscaler/main.go --migrate
+
+## migrate-script: Run migration script
+migrate-script:
+	./scripts/migrate.sh
