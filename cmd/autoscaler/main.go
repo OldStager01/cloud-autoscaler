@@ -11,10 +11,9 @@ import (
 	"time"
 
 	"github.com/OldStager01/cloud-autoscaler/api"
-	"github.com/OldStager01/cloud-autoscaler/internal/analyzer"
 	"github.com/OldStager01/cloud-autoscaler/internal/collector"
-	"github.com/OldStager01/cloud-autoscaler/internal/decision"
 	"github.com/OldStager01/cloud-autoscaler/internal/logger"
+	"github.com/OldStager01/cloud-autoscaler/internal/orchestrator"
 	"github.com/OldStager01/cloud-autoscaler/internal/scaler"
 	"github.com/OldStager01/cloud-autoscaler/pkg/config"
 	"github.com/OldStager01/cloud-autoscaler/pkg/database"
@@ -31,7 +30,7 @@ func main() {
 func run() error {
 	configPath := flag.String("config", "", "path to config file")
 	migrate := flag.Bool("migrate", false, "run database migrations")
-	testPipeline := flag.Bool("test-pipeline", false, "test full pipeline")
+	testOrchestrator := flag.Bool("test-orchestrator", false, "test orchestrator")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -67,8 +66,8 @@ func run() error {
 		return nil
 	}
 
-	if *testPipeline {
-		return runFullPipelineTest(cfg)
+	if *testOrchestrator {
+		return runOrchestratorTest(cfg, db)
 	}
 
 	server := api.NewServer(cfg.API, db)
@@ -102,151 +101,89 @@ func run() error {
 	return nil
 }
 
-func runFullPipelineTest(cfg *config.Config) error {
-	logger.Info("Running full pipeline test")
-	clusterID := "test-cluster-1"
-	ctx := context.Background()
+func runOrchestratorTest(cfg *config.Config, db *database.DB) error {
+	logger.Info("Running orchestrator test")
 
-	// Initialize components
-	mockCollector := collector.NewMockCollector(collector.MockCollectorConfig{
-		BaseCPU:    50.0,
-		BaseMemory:  60.0,
+	// Create orchestrator
+	orch := orchestrator.New(cfg, db)
+	if err := orch.Start(); err != nil {
+		return fmt.Errorf("failed to start orchestrator: %w", err)
+	}
+
+	// Subscribe to events for logging
+	eventChan := orch.SubscribeAllEvents()
+	go func() {
+		for event := range eventChan {
+			logger.Infof("[EVENT] %s:  %s (cluster: %s, severity: %s)",
+				event.Type, event.Message, event.ClusterID, event.Severity)
+		}
+	}()
+
+	// Create test cluster
+	cluster := &models.Cluster{
+		ID:         "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+		Name:       "Test Cluster",
+		MinServers: 2,
+		MaxServers: 10,
+		Status:     models.ClusterStatusActive,
+	}
+
+	// Create mock collector
+	mockColl := collector.NewMockCollector(collector.MockCollectorConfig{
+		BaseCPU:     55.0,
+		BaseMemory: 60.0,
 		Variance:   10.0,
 	})
-	mockCollector.SetClusterServers(clusterID, 3)
+	mockColl.SetClusterServers(cluster.ID, 3)
 
-	analyzerInstance := analyzer.New(analyzer.Config{
-		CPUHighThreshold:     cfg.Analyzer.Thresholds.CPUHigh,
-		CPULowThreshold:     cfg.Analyzer.Thresholds.CPULow,
-		MemoryHighThreshold: cfg.Analyzer.Thresholds.MemoryHigh,
-		TrendWindow:         cfg.Analyzer.TrendWindow,
-		SpikeThreshold:      cfg.Analyzer.SpikeThreshold,
+	// Create simulator scaler
+	simScaler := scaler.NewSimulatorScaler(scaler.SimulatorConfig{
+		ProvisionTime: 3 * time.Second,
+		DrainTimeout:  2 * time.Second,
 	})
+	simScaler.InitializeCluster(cluster.ID, 3)
 
-	sustainedTracker := analyzer.NewSustainedTracker()
-
-	decisionEngine := decision.NewEngine(decision.Config{
-		CooldownPeriod:        5 * time.Second, // Short for testing
-		EmergencyCPUThreshold: cfg.Decision.EmergencyCPUThreshold,
-		MinServers:            cfg.Decision.MinServers,
-		MaxServers:            cfg.Decision.MaxServers,
-		MaxScaleStep:          cfg.Decision.MaxScaleStep,
-		CPUHighThreshold:      cfg.Analyzer.Thresholds.CPUHigh,
-		CPULowThreshold:       cfg.Analyzer.Thresholds.CPULow,
-		SustainedHighDuration: 2 * time.Second, // Short for testing
-		SustainedLowDuration:  5 * time.Second, // Short for testing
-	})
-
-	simulatorScaler := scaler.NewSimulatorScaler(scaler.SimulatorConfig{
-		ProvisionTime: 2 * time.Second, // Short for testing
-		DrainTimeout:  3 * time.Second, // Short for testing
-		Callbacks: scaler.StateCallbacks{
-			OnServerActivated: func(server *models.Server) {
-				logger.WithCluster(server.ClusterID).Infof("Callback: server %s activated", server.ID[: 8])
-			},
-			OnServerTerminated: func(server *models.Server) {
-				logger.WithCluster(server.ClusterID).Infof("Callback: server %s terminated", server.ID[:8])
-			},
-		},
-	})
-
-	// Initialize cluster with 3 active servers
-	simulatorScaler.InitializeCluster(clusterID, 3)
-
-	logger.Info("=== Phase 1: Normal operation ===")
-	for i := 0; i < 3; i++ {
-		runPipelineCycle(ctx, clusterID, mockCollector, analyzerInstance, sustainedTracker, decisionEngine, simulatorScaler, cfg)
-		time.Sleep(500 * time.Millisecond)
+	// Start cluster pipeline
+	if err := orch.StartCluster(cluster, mockColl, simScaler); err != nil {
+		return fmt.Errorf("failed to start cluster:  %w", err)
 	}
 
-	logger.Info("=== Phase 2: High CPU - should trigger scale up ===")
-	mockCollector.SetBaseCPU(85.0)
-	for i := 0; i < 4; i++ {
-		runPipelineCycle(ctx, clusterID, mockCollector, analyzerInstance, sustainedTracker, decisionEngine, simulatorScaler, cfg)
-		time.Sleep(1 * time.Second)
+	// Let it run for a few cycles at normal CPU
+	logger.Info("=== Phase 1: Normal operation (15 seconds) ===")
+	time.Sleep(15 * time.Second)
+
+	// Simulate high CPU
+	logger.Info("=== Phase 2: High CPU (20 seconds) ===")
+	mockColl.SetBaseCPU(85.0)
+	time.Sleep(20 * time.Second)
+
+	// Simulate emergency
+	logger.Info("=== Phase 3: Emergency CPU (10 seconds) ===")
+	mockColl.SetBaseCPU(96.0)
+	time.Sleep(10 * time.Second)
+
+	// Back to normal
+	logger.Info("=== Phase 4: Back to normal (10 seconds) ===")
+	mockColl.SetBaseCPU(50.0)
+	time.Sleep(10 * time.Second)
+
+	// Check running clusters
+	running := orch.ListRunningClusters()
+	logger.Infof("Running clusters: %v", running)
+
+	// Get final state
+	state, _ := simScaler.GetClusterState(context.Background(), cluster.ID)
+	logger.Infof("Final state: active=%d, provisioning=%d, draining=%d",
+		state.ActiveServers, state.ProvisioningCnt, state.DrainingCount)
+
+	// Stop cluster
+	if err := orch.StopCluster(cluster.ID); err != nil {
+		logger.Errorf("Failed to stop cluster: %v", err)
 	}
 
-	// Wait for servers to provision
-	logger.Info("Waiting for servers to activate...")
-	time.Sleep(3 * time.Second)
+	// Stop orchestrator
+	orch.Stop()
 
-	logger.Info("=== Phase 3: Emergency CPU ===")
-	mockCollector.SetBaseCPU(96.0)
-	runPipelineCycle(ctx, clusterID, mockCollector, analyzerInstance, sustainedTracker, decisionEngine, simulatorScaler, cfg)
-
-	// Wait for emergency servers
-	time.Sleep(3 * time.Second)
-
-	logger.Info("=== Phase 4: Low CPU - should trigger scale down ===")
-	mockCollector.SetBaseCPU(20.0)
-	for i := 0; i < 6; i++ {
-		runPipelineCycle(ctx, clusterID, mockCollector, analyzerInstance, sustainedTracker, decisionEngine, simulatorScaler, cfg)
-		time.Sleep(1 * time.Second)
-	}
-
-	// Final state
-	time.Sleep(2 * time.Second)
-	finalState, _ := simulatorScaler.GetClusterState(ctx, clusterID)
-	logger.Infof("=== Final cluster state: total=%d, active=%d, provisioning=%d, draining=%d ===",
-		finalState.TotalServers, finalState.ActiveServers, finalState.ProvisioningCnt, finalState.DrainingCount)
-
-	logger.Info("Full pipeline test completed")
+	logger.Info("Orchestrator test completed")
 	return nil
-}
-
-func runPipelineCycle(
-	ctx context.Context,
-	clusterID string,
-	coll *collector.MockCollector,
-	anal *analyzer.Analyzer,
-	sustained *analyzer.SustainedTracker,
-	engine *decision.Engine,
-	scal *scaler.SimulatorScaler,
-	cfg *config.Config,
-) {
-	// Collect
-	metrics, err := coll.Collect(ctx, clusterID)
-	if err != nil {
-		logger.Errorf("Collection failed: %v", err)
-		return
-	}
-
-	// Analyze
-	analyzed := anal.Analyze(metrics)
-	sustained.Update(clusterID, analyzed, analyzer.Config{
-		CPUHighThreshold:  cfg.Analyzer.Thresholds.CPUHigh,
-		CPULowThreshold:   cfg.Analyzer.Thresholds.CPULow,
-	})
-
-	// Get current state
-	state, _ := scal.GetClusterState(ctx, clusterID)
-
-	logger.Infof("Metrics: cpu=%.1f%% (%s), servers=%d active, trend=%s",
-		analyzed.AvgCPU, analyzed.CPUStatus, state.ActiveServers, analyzed.Trend)
-
-	// Decide
-	decisionResult := engine.Decide(analyzed, nil, state)
-
-	// Execute
-	if decisionResult.ShouldExecute() {
-		var result *scaler.ScaleResult
-		var err error
-
-		switch decisionResult.Action {
-		case models.ActionScaleUp:
-			delta := decisionResult.TargetServers - decisionResult.CurrentServers
-			result, err = scal.ScaleUp(ctx, clusterID, delta)
-		case models.ActionScaleDown:
-			delta := decisionResult.CurrentServers - decisionResult.TargetServers
-			result, err = scal.ScaleDown(ctx, clusterID, delta)
-		}
-
-		if err != nil {
-			logger.Errorf("Scaling failed: %v", err)
-		} else if result.Success {
-			engine.RecordScaling(clusterID)
-			logger.Infof("Scaling executed:  added=%d, removed=%d",
-				len(result.ServersAdded), len(result.ServersRemoved))
-		}
-	}
 }
