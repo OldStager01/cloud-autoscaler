@@ -4,9 +4,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
+	"github.com/OldStager01/cloud-autoscaler/api"
+	"github.com/OldStager01/cloud-autoscaler/internal/logger"
 	"github.com/OldStager01/cloud-autoscaler/pkg/config"
 	"github.com/OldStager01/cloud-autoscaler/pkg/database"
 )
@@ -23,6 +28,7 @@ func run() error {
 	migrate := flag.Bool("migrate", false, "run database migrations")
 	flag.Parse()
 
+	// Load configuration
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -32,10 +38,12 @@ func run() error {
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
-	fmt.Printf("Starting %s in %s mode\n", cfg.App.Name, cfg.App.Mode)
+	// Setup logger
+	logger.Setup(cfg.App.LogLevel, cfg.App.Mode)
+	logger.Infof("Starting %s in %s mode", cfg.App.Name, cfg.App.Mode)
 
 	// Connect to database
-	fmt.Printf("Connecting to database at %s:%d/%s...\n",
+	logger.Infof("Connecting to database at %s:%d/%s",
 		cfg.Database.Host, cfg.Database.Port, cfg.Database.Name)
 
 	db, err := database.New(cfg.Database.ToDBConfig())
@@ -44,34 +52,53 @@ func run() error {
 	}
 	defer db.Close()
 
-	fmt.Println("Database connection established")
+	logger.Info("Database connection established")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	// Run migrations if flag is set
 	if *migrate {
-		fmt.Println("Running database migrations...")
+		logger.Info("Running database migrations")
 		migrator := database.NewMigrator(db)
 		if err := migrator.Run(ctx); err != nil {
 			return fmt.Errorf("migration failed: %w", err)
 		}
-		fmt.Println("Migrations completed successfully")
+		logger.Info("Migrations completed successfully")
+		return nil
 	}
 
-	// Verify tables exist
-	tables := []string{"users", "clusters", "servers", "scaling_events", "metrics_history", "predictions"}
-	for _, table := range tables {
-		exists, err := db.TableExists(ctx, table)
-		if err != nil {
-			fmt.Printf("Warning: could not check table %s: %v\n", table, err)
-			continue
+	// Create and start API server
+	server := api.NewServer(cfg.API, db)
+
+	// Graceful shutdown setup
+	shutdownChan := make(chan os.Signal, 1)
+	signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM)
+
+	errChan := make(chan error, 1)
+	go func() {
+		logger.Infof("API server listening on port %d", cfg.API.Port)
+		if err := server.Start(); err != nil && err != http.ErrServerClosed {
+			errChan <- err
 		}
-		if exists {
-			fmt.Printf("Table %s:  OK\n", table)
-		} else {
-			fmt.Printf("Table %s: MISSING (run with --migrate)\n", table)
-		}
+	}()
+
+	// Wait for shutdown signal or error
+	select {
+	case err := <-errChan: 
+		return fmt.Errorf("server error: %w", err)
+	case sig := <-shutdownChan: 
+		logger.Infof("Received signal %v, shutting down", sig)
 	}
 
+	// Graceful shutdown
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown error: %w", err)
+	}
+
+	logger.Info("Server stopped gracefully")
 	return nil
 }
