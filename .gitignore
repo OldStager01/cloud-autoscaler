@@ -44,3 +44,5 @@ web/. env. local
 # Temporary files
 tmp/
 temp/
+
+.vscode

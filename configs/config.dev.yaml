@@ -1,0 +1,64 @@
+app:
+  name: cloud-autoscaler
+  mode: development
+  log_level: debug
+
+database:
+  host: localhost
+  port: 5432
+  name: autoscaler
+  user: admin
+  password: password
+  max_connections: 25
+  ssl_mode: disable
+
+collector:
+  type: http
+  endpoint: http://localhost:9000/metrics
+  interval: 10s
+  timeout: 5s
+  retry_attempts: 3
+  circuit_breaker:
+    max_failures: 5
+    timeout: 30s
+
+analyzer:
+  thresholds:
+    cpu_high: 80
+    cpu_low: 30
+    memory_high: 85
+  trend_window: 5m
+  spike_threshold: 50
+
+decision:
+  cooldown_period: 5m
+  emergency_cpu_threshold: 95
+  min_servers: 2
+  max_servers: 50
+  max_scale_step: 3
+
+predictor:
+  enabled: false
+  type: pattern_matching
+  forecast_window: 15m
+  min_confidence: 0.7
+
+scaler:
+  type: simulator
+  provision_time: 10s
+  drain_timeout: 30s
+
+api:
+  port: 8080
+  read_timeout: 15s
+  write_timeout: 15s
+  rate_limit: 100
+  jwt_secret: dev-secret-key-not-for-production
+
+websocket:
+  max_connections: 1000
+  ping_interval: 30s
+
+prometheus:
+  enabled: true
+  port: 9090
