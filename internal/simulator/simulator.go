@@ -18,7 +18,7 @@ type Config struct {
 type Simulator struct {
 	config     Config
 	clusters   map[string]*ClusterSim
-	mu         sync.RWMutex
+	mu         sync. RWMutex
 	httpServer *http.Server
 }
 
@@ -33,21 +33,36 @@ func New(cfg Config) *Simulator {
 	}
 }
 
+func cors(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next(w, r)
+	}
+}
+
 func (s *Simulator) Start() error {
 	mux := http.NewServeMux()
 
-	// Routes
-	mux.HandleFunc("/health", s.healthHandler)
-	mux.HandleFunc("/metrics/", s.metricsHandler)
-	mux.HandleFunc("/clusters", s.listClustersHandler)
-	mux.HandleFunc("/clusters/", s.clusterHandler)
-	mux.HandleFunc("/spike", s.spikeHandler)
-	mux.HandleFunc("/pattern", s.patternHandler)
+	// Routes with CORS
+	mux.HandleFunc("/health", cors(s.healthHandler))
+	mux.HandleFunc("/metrics/", cors(s.metricsHandler))
+	mux.HandleFunc("/clusters", cors(s.listClustersHandler))
+	mux.HandleFunc("/clusters/", cors(s.clusterHandler))
+	mux.HandleFunc("/spike", cors(s.spikeHandler))
+	mux.HandleFunc("/pattern", cors(s.patternHandler))
 
 	addr := fmt.Sprintf(":%d", s.config.Port)
 	s.httpServer = &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:       mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
@@ -62,6 +77,7 @@ func (s *Simulator) Start() error {
 
 	return nil
 }
+
 
 func (s *Simulator) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
