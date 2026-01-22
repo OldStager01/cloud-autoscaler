@@ -108,3 +108,11 @@ migrate:
 ## migrate-script: Run migration script
 migrate-script:
 	./scripts/migrate.sh
+
+## simulator:  Run the metrics simulator
+simulator:
+	$(GORUN) ./cmd/simulator/main.go
+
+## simulator-port: Run simulator on custom port
+simulator-port:
+	$(GORUN) ./cmd/simulator/main.go --port=$(PORT)
