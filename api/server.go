@@ -8,6 +8,7 @@ import (
 
 	"github.com/OldStager01/cloud-autoscaler/api/handlers"
 	"github.com/OldStager01/cloud-autoscaler/api/middleware"
+	"github.com/OldStager01/cloud-autoscaler/api/websocket"
 	"github.com/OldStager01/cloud-autoscaler/internal/auth"
 	"github.com/OldStager01/cloud-autoscaler/pkg/config"
 	"github.com/OldStager01/cloud-autoscaler/pkg/database"
@@ -21,6 +22,7 @@ type Server struct {
 	config      config.APIConfig
 	db          *database.DB
 	authService *auth.Service
+	wsHub       *websocket.Hub
 }
 
 func NewServer(cfg config.APIConfig, db *database.DB) *Server {
@@ -32,16 +34,21 @@ func NewServer(cfg config.APIConfig, db *database.DB) *Server {
 
 	router := gin.New()
 	authService := auth.NewService(cfg.JWTSecret, 24*time.Hour)
+	wsHub := websocket.NewHub()
 
 	s := &Server{
 		router:       router,
 		config:      cfg,
-		db:          db,
-		authService: authService,
+		db:           db,
+		authService:  authService,
+		wsHub:       wsHub,
 	}
 
 	s.setupMiddleware()
 	s.setupRoutes()
+
+	// Start WebSocket hub
+	go wsHub.Run()
 
 	return s
 }
@@ -60,11 +67,14 @@ func (s *Server) setupRoutes() {
 	// Repositories
 	userRepo := queries.NewUserRepository(s.db.DB)
 	clusterRepo := queries.NewClusterRepository(s.db.DB)
+	metricsRepo := queries.NewMetricsRepository(s.db.DB)
+	eventsRepo := queries.NewScalingEventRepository(s.db.DB)
 
 	// Handlers
 	healthHandler := handlers.NewHealthHandler(s.db)
 	authHandler := handlers.NewAuthHandler(userRepo, s.authService)
 	clusterHandler := handlers.NewClusterHandler(clusterRepo)
+	metricsHandler := handlers.NewMetricsHandler(metricsRepo, eventsRepo)
 
 	// Public routes
 	s.router.GET("/health", healthHandler.Health)
@@ -73,6 +83,9 @@ func (s *Server) setupRoutes() {
 
 	// Auth routes
 	s.router.POST("/auth/login", authHandler.Login)
+
+	// WebSocket route
+	s.router.GET("/ws", websocket.ServeWebSocket(s.wsHub))
 
 	// Protected routes
 	protected := s.router.Group("/")
@@ -85,6 +98,16 @@ func (s *Server) setupRoutes() {
 		protected.PUT("/clusters/:id", clusterHandler.Update)
 		protected.DELETE("/clusters/:id", clusterHandler.Delete)
 		protected.GET("/clusters/:id/status", clusterHandler.GetStatus)
+
+		// Metrics
+		protected.GET("/clusters/:id/metrics", metricsHandler.GetMetrics)
+		protected.GET("/clusters/:id/metrics/latest", metricsHandler.GetLatestMetrics)
+		protected.GET("/clusters/:id/metrics/hourly", metricsHandler.GetHourlyMetrics)
+
+		// Scaling Events
+		protected.GET("/clusters/:id/events", metricsHandler.GetScalingEvents)
+		protected.GET("/clusters/:id/events/stats", metricsHandler.GetScalingStats)
+		protected.GET("/events/recent", metricsHandler.GetRecentEvents)
 	}
 }
 
@@ -111,4 +134,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 func (s *Server) Router() *gin.Engine {
 	return s.router
+}
+
+func (s *Server) WebSocketHub() *websocket.Hub {
+	return s.wsHub
 }
