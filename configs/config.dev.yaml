@@ -15,7 +15,7 @@ database:
 collector:
   type: http
   endpoint: http://localhost:9000/metrics
-  interval: 10s
+  interval: 5s
   timeout: 5s
   retry_attempts: 3
   circuit_breaker:
@@ -27,11 +27,14 @@ analyzer:
     cpu_high: 80
     cpu_low: 30
     memory_high: 85
-  trend_window: 5m
+  trend_window: 1m
   spike_threshold: 50
 
 decision:
-  cooldown_period: 5m
+  cooldown_period: 30s
+  scale_down_cooldown_period: 30s
+  sustained_high_duration: 30s
+  sustained_low_duration: 30s
   emergency_cpu_threshold: 95
   min_servers: 2
   max_servers: 50
@@ -46,7 +49,7 @@ predictor:
 scaler:
   type: simulator
   provision_time: 10s
-  drain_timeout: 30s
+  drain_timeout: 10s
 
 api:
   port: 8080

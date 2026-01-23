@@ -1,0 +1,314 @@
+{
+  "info": {
+    "_postman_id": "cloud-autoscaler-simulator",
+    "name": "Cloud Autoscaler - Simulator",
+    "description": "Metrics Simulator API for testing the Cloud Autoscaler.\n\n## Base URL\nDefault: `http://localhost:9000`\n\n## Purpose\nThe simulator generates fake metrics data to test autoscaling behavior without real infrastructure.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "simulator_url",
+      "value": "http://localhost:9000",
+      "type": "string"
+    },
+    {
+      "key": "cluster_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Simulator Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{simulator_url}}/health",
+              "host": ["{{simulator_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check if simulator is running"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"status\": \"healthy\",\n    \"service\": \"metrics-simulator\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Clusters",
+      "description": "Manage simulated clusters",
+      "item": [
+        {
+          "name": "List Simulated Clusters",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{simulator_url}}/clusters",
+              "host": ["{{simulator_url}}"],
+              "path": ["clusters"]
+            },
+            "description": "List all simulated clusters"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"clusters\": [\n        {\n            \"id\": \"cluster-1\",\n            \"server_count\": 5,\n            \"pattern\": \"daily\"\n        }\n    ],\n    \"count\": 1\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Simulated Cluster",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('cluster_id', jsonData.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"servers\": 5,\n    \"base_cpu\": 50.0,\n    \"base_memory\": 60.0,\n    \"variance\": 10.0\n}"
+            },
+            "url": {
+              "raw": "{{simulator_url}}/clusters/{{cluster_id}}",
+              "host": ["{{simulator_url}}"],
+              "path": ["clusters", "{{cluster_id}}"]
+            },
+            "description": "Create a new simulated cluster.\n\n**Parameters:**\n- `servers`: Initial server count (default: 3)\n- `base_cpu`: Base CPU usage % (default: 50)\n- `base_memory`: Base memory usage % (default: 60)\n- `variance`: Random variance % (default: 10)"
+          },
+          "response": [
+            {
+              "name": "Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n    \"id\": \"cluster-1\",\n    \"server_count\": 5,\n    \"base_cpu\": 50.0,\n    \"base_memory\": 60.0,\n    \"pattern\": \"steady\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Simulated Cluster",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{simulator_url}}/clusters/{{cluster_id}}",
+              "host": ["{{simulator_url}}"],
+              "path": ["clusters", "{{cluster_id}}"]
+            },
+            "description": "Get status of a simulated cluster"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"id\": \"cluster-1\",\n    \"server_count\": 5,\n    \"base_cpu\": 50.0,\n    \"base_memory\": 60.0,\n    \"pattern\": \"daily\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Simulated Cluster",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"base_cpu\": 75.0,\n    \"add_servers\": 2\n}"
+            },
+            "url": {
+              "raw": "{{simulator_url}}/clusters/{{cluster_id}}",
+              "host": ["{{simulator_url}}"],
+              "path": ["clusters", "{{cluster_id}}"]
+            },
+            "description": "Update simulated cluster settings.\n\n**Optional Parameters:**\n- `base_cpu`: New base CPU %\n- `base_memory`: New base memory %\n- `variance`: New variance %\n- `add_servers`: Add N servers\n- `remove_servers`: Remove N servers"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"id\": \"cluster-1\",\n    \"server_count\": 7,\n    \"base_cpu\": 75.0,\n    \"base_memory\": 60.0,\n    \"pattern\": \"steady\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Simulated Cluster",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{simulator_url}}/clusters/{{cluster_id}}",
+              "host": ["{{simulator_url}}"],
+              "path": ["clusters", "{{cluster_id}}"]
+            },
+            "description": "Delete a simulated cluster"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"message\": \"cluster deleted\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Metrics",
+      "description": "Collect simulated metrics",
+      "item": [
+        {
+          "name": "Get Cluster Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{simulator_url}}/metrics/{{cluster_id}}",
+              "host": ["{{simulator_url}}"],
+              "path": ["metrics", "{{cluster_id}}"]
+            },
+            "description": "Collect current metrics from simulated cluster.\n\nThis is the endpoint the autoscaler calls to get metrics."
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"cluster_id\": \"cluster-1\",\n    \"timestamp\": \"2026-01-23T10:00:00Z\",\n    \"servers\": [\n        {\n            \"server_id\": \"server-1\",\n            \"cpu_usage\": 52.3,\n            \"memory_usage\": 61.5,\n            \"request_load\": 1250\n        },\n        {\n            \"server_id\": \"server-2\",\n            \"cpu_usage\": 48.7,\n            \"memory_usage\": 58.2,\n            \"request_load\": 1180\n        }\n    ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Load Simulation",
+      "description": "Inject load patterns and spikes to trigger scaling",
+      "item": [
+        {
+          "name": "Inject CPU Spike (Trigger Scale Up)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"cluster_id\": \"{{cluster_id}}\",\n    \"cpu_target\": 90.0,\n    \"duration\": \"5m\",\n    \"ramp_up\": \"30s\"\n}"
+            },
+            "url": {
+              "raw": "{{simulator_url}}/spike",
+              "host": ["{{simulator_url}}"],
+              "path": ["spike"]
+            },
+            "description": "Inject a CPU spike to trigger autoscaling.\n\n**Parameters:**\n- `cluster_id`: Target cluster\n- `cpu_target`: Target CPU % (e.g., 90 for scale-up trigger)\n- `duration`: How long the spike lasts (e.g., \"5m\", \"10m\")\n- `ramp_up`: Time to reach target (e.g., \"30s\", \"1m\")\n\n**To trigger SCALE UP:** Set `cpu_target` > 80 (threshold)\n**To trigger SCALE DOWN:** Set `cpu_target` < 30 (threshold)"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"message\": \"spike injected\",\n    \"cluster_id\": \"cluster-1\",\n    \"cpu_target\": 90.0,\n    \"duration\": \"5m0s\",\n    \"ramp_up\": \"30s\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Inject Low Load (Trigger Scale Down)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"cluster_id\": \"{{cluster_id}}\",\n    \"cpu_target\": 20.0,\n    \"duration\": \"10m\",\n    \"ramp_up\": \"1m\"\n}"
+            },
+            "url": {
+              "raw": "{{simulator_url}}/spike",
+              "host": ["{{simulator_url}}"],
+              "path": ["spike"]
+            },
+            "description": "Inject low CPU to trigger scale-down.\n\nSet `cpu_target` below the low threshold (30%) to trigger scale down."
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"message\": \"spike injected\",\n    \"cluster_id\": \"cluster-1\",\n    \"cpu_target\": 20.0,\n    \"duration\": \"10m0s\",\n    \"ramp_up\": \"1m0s\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Set Traffic Pattern",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"cluster_id\": \"{{cluster_id}}\",\n    \"pattern\": \"daily\"\n}"
+            },
+            "url": {
+              "raw": "{{simulator_url}}/pattern",
+              "host": ["{{simulator_url}}"],
+              "path": ["pattern"]
+            },
+            "description": "Set a load pattern on the cluster.\n\n**Available Patterns:**\n- `steady` - Constant load (default)\n- `daily` - High during business hours (9-11 AM, 2-4 PM)\n- `weekly` - Daily pattern + weekend reduction\n- `random` - Unpredictable spikes and drops\n- `gradual_rise` - Slowly increasing load over time"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"message\": \"pattern set\",\n    \"cluster_id\": \"cluster-1\",\n    \"pattern\": \"daily\"\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,11 @@
 package scaler
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -10,15 +14,18 @@ import (
 )
 
 type SimulatorScaler struct {
-	stateTracker  *StateTracker
-	provisionTime time.Duration
-	drainTimeout  time.Duration
-	mu            sync.Mutex
+	stateTracker   *StateTracker
+	provisionTime  time.Duration
+	drainTimeout   time.Duration
+	simulatorURL   string
+	httpClient     *http.Client
+	mu             sync.Mutex
 }
 
 type SimulatorConfig struct {
 	ProvisionTime time.Duration
 	DrainTimeout  time.Duration
+	SimulatorURL  string
 	Callbacks     StateCallbacks
 }
 
@@ -29,11 +36,18 @@ func NewSimulatorScaler(cfg SimulatorConfig) *SimulatorScaler {
 	if cfg.DrainTimeout == 0 {
 		cfg.DrainTimeout = 30 * time.Second
 	}
+	if cfg.SimulatorURL == "" {
+		cfg.SimulatorURL = "http://localhost:9000"
+	}
 
 	return &SimulatorScaler{
 		stateTracker:   NewStateTracker(cfg.Callbacks),
-		provisionTime: cfg.ProvisionTime,
-		drainTimeout:  cfg.DrainTimeout,
+		provisionTime:  cfg.ProvisionTime,
+		drainTimeout:   cfg.DrainTimeout,
+		simulatorURL:   cfg.SimulatorURL,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
 	}
 }
 
@@ -50,7 +64,12 @@ func (s *SimulatorScaler) ScaleUp(ctx context.Context, clusterID string, count i
 		ServersAdded: make([]string, 0, count),
 	}
 
-	logger.WithCluster(clusterID).Infof("Scaling up:  adding %d servers", count)
+	logger.WithCluster(clusterID).Infof("Scaling up: adding %d servers", count)
+
+	// Notify external simulator to add servers
+	if err := s.notifySimulator(clusterID, count, 0); err != nil {
+		logger.WithCluster(clusterID).Warnf("Failed to notify simulator: %v", err)
+	}
 
 	for i := 0; i < count; i++ {
 		server := models.NewServer(clusterID)
@@ -98,6 +117,11 @@ func (s *SimulatorScaler) ScaleDown(ctx context.Context, clusterID string, count
 	}
 
 	logger.WithCluster(clusterID).Infof("Scaling down: removing %d servers", toRemove)
+
+	// Notify external simulator to remove servers
+	if err := s.notifySimulator(clusterID, 0, toRemove); err != nil {
+		logger.WithCluster(clusterID).Warnf("Failed to notify simulator: %v", err)
+	}
 
 	for i := 0; i < toRemove; i++ {
 		server := activeServers[i]
@@ -156,4 +180,40 @@ func (s *SimulatorScaler) InitializeCluster(clusterID string, serverCount int) {
 // GetStateTracker returns the internal state tracker for testing
 func (s *SimulatorScaler) GetStateTracker() *StateTracker {
 	return s.stateTracker
+}
+
+// notifySimulator calls the external simulator API to add/remove servers
+func (s *SimulatorScaler) notifySimulator(clusterID string, addServers, removeServers int) error {
+	payload := map[string]interface{}{}
+	if addServers > 0 {
+		payload["add_servers"] = addServers
+	}
+	if removeServers > 0 {
+		payload["remove_servers"] = removeServers
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/clusters/%s", s.simulatorURL, clusterID)
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to call simulator: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("simulator returned status %d", resp.StatusCode)
+	}
+
+	logger.Infof("Notified simulator: cluster=%s add=%d remove=%d", clusterID, addServers, removeServers)
+	return nil
 }

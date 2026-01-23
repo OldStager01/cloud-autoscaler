@@ -50,13 +50,16 @@ func New(cfg *config.Config, db *database.DB) *Orchestrator {
 	}
 
 	decisionCfg := decision.Config{
-		CooldownPeriod:         cfg.Decision.CooldownPeriod,
-		EmergencyCPUThreshold: cfg.Decision.EmergencyCPUThreshold,
-		MinServers:            cfg.Decision.MinServers,
-		MaxServers:             cfg.Decision.MaxServers,
-		MaxScaleStep:          cfg.Decision.MaxScaleStep,
-		CPUHighThreshold:      cfg.Analyzer.Thresholds.CPUHigh,
-		CPULowThreshold:       cfg.Analyzer.Thresholds.CPULow,
+		CooldownPeriod:          cfg.Decision.CooldownPeriod,
+		ScaleDownCooldownPeriod: cfg.Decision.ScaleDownCooldownPeriod,
+		SustainedHighDuration:   cfg.Decision.SustainedHighDuration,
+		SustainedLowDuration:    cfg.Decision.SustainedLowDuration,
+		EmergencyCPUThreshold:   cfg.Decision.EmergencyCPUThreshold,
+		MinServers:              cfg.Decision.MinServers,
+		MaxServers:              cfg.Decision.MaxServers,
+		MaxScaleStep:            cfg.Decision.MaxScaleStep,
+		CPUHighThreshold:        cfg.Analyzer.Thresholds.CPUHigh,
+		CPULowThreshold:         cfg.Analyzer.Thresholds.CPULow,
 	}
 
 	return &Orchestrator{

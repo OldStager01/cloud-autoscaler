@@ -17,14 +17,16 @@ type ClusterSimConfig struct {
 }
 
 type ClusterSim struct {
-	id         string
-	servers    []*ServerSim
-	baseCPU    float64
-	baseMemory float64
-	variance   float64
-	pattern    Pattern
-	spike      *Spike
-	mu         sync.RWMutex
+	id                string
+	servers           []*ServerSim
+	baseCPU           float64
+	baseMemory        float64
+	variance          float64
+	pattern           Pattern
+	spike             *Spike
+	memorySpike       *MemorySpike
+	memoryCorrelation float64 // How much memory follows CPU (0.0 to 1.0)
+	mu                sync.RWMutex
 }
 
 type ServerSim struct {
@@ -41,14 +43,23 @@ type Spike struct {
 	OriginalCPU float64
 }
 
+type MemorySpike struct {
+	TargetMemory   float64
+	StartTime      time.Time
+	Duration       time.Duration
+	RampUp         time.Duration
+	OriginalMemory float64
+}
+
 func NewClusterSim(id string, cfg ClusterSimConfig) *ClusterSim {
 	cluster := &ClusterSim{
-		id:         id,
-		baseCPU:    cfg.BaseCPU,
-		baseMemory: cfg.BaseMemory,
-		variance:   cfg.Variance,
-		pattern:    PatternSteady,
-		servers:    make([]*ServerSim, 0, cfg.InitialServers),
+		id:                id,
+		baseCPU:           cfg.BaseCPU,
+		baseMemory:        cfg.BaseMemory,
+		variance:          cfg.Variance,
+		pattern:           PatternSteady,
+		servers:           make([]*ServerSim, 0, cfg.InitialServers),
+		memoryCorrelation: 0.6, // Memory follows 60% of CPU changes by default
 	}
 
 	for i := 0; i < cfg.InitialServers; i++ {
@@ -67,6 +78,7 @@ func (c *ClusterSim) CollectMetrics() *MetricsResponse {
 	defer c.mu.RUnlock()
 
 	currentCPU := c.calculateCurrentCPU()
+	currentMemory := c.calculateCurrentMemory(currentCPU)
 	servers := make([]ServerMetrics, 0, len(c.servers))
 
 	for _, srv := range c.servers {
@@ -77,7 +89,7 @@ func (c *ClusterSim) CollectMetrics() *MetricsResponse {
 		servers = append(servers, ServerMetrics{
 			ServerID:    srv.ID,
 			CPUUsage:    c.randomValue(currentCPU, c.variance),
-			MemoryUsage: c.randomValue(c.baseMemory, c.variance/2),
+			MemoryUsage: c.randomValue(currentMemory, c.variance/2),
 			RequestLoad: int(c.randomValue(100, 30)),
 		})
 	}
@@ -113,6 +125,43 @@ func (c *ClusterSim) calculateCurrentCPU() float64 {
 	}
 
 	return baseCPU
+}
+
+func (c *ClusterSim) calculateCurrentMemory(currentCPU float64) float64 {
+	baseMemory := c.baseMemory
+
+	// Memory correlates with CPU changes
+	// If CPU went up by X%, memory goes up by X% * correlation factor
+	cpuDelta := currentCPU - c.baseCPU
+	memoryDelta := cpuDelta * c.memoryCorrelation
+	baseMemory += memoryDelta
+
+	// Apply memory spike if active
+	if c.memorySpike != nil {
+		elapsed := time.Since(c.memorySpike.StartTime)
+
+		if elapsed > c.memorySpike.Duration {
+			// Spike ended
+			c.memorySpike = nil
+		} else if elapsed < c.memorySpike.RampUp {
+			// Ramping up
+			progress := float64(elapsed) / float64(c.memorySpike.RampUp)
+			baseMemory = c.memorySpike.OriginalMemory + (c.memorySpike.TargetMemory-c.memorySpike.OriginalMemory)*progress
+		} else {
+			// At peak
+			baseMemory = c.memorySpike.TargetMemory
+		}
+	}
+
+	// Clamp to valid range
+	if baseMemory < 10 {
+		baseMemory = 10
+	}
+	if baseMemory > 100 {
+		baseMemory = 100
+	}
+
+	return baseMemory
 }
 
 func (c *ClusterSim) randomValue(base, variance float64) float64 {
@@ -167,6 +216,31 @@ func (c *ClusterSim) InjectSpike(targetCPU float64, duration, rampUp time.Durati
 		RampUp:       rampUp,
 		OriginalCPU: c.baseCPU,
 	}
+}
+
+func (c *ClusterSim) InjectMemorySpike(targetMemory float64, duration, rampUp time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.memorySpike = &MemorySpike{
+		TargetMemory:   targetMemory,
+		StartTime:      time.Now(),
+		Duration:       duration,
+		RampUp:         rampUp,
+		OriginalMemory: c.baseMemory,
+	}
+}
+
+func (c *ClusterSim) SetMemoryCorrelation(correlation float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if correlation < 0 {
+		correlation = 0
+	}
+	if correlation > 1 {
+		correlation = 1
+	}
+	c.memoryCorrelation = correlation
 }
 
 func (c *ClusterSim) AddServers(count int) {
@@ -226,14 +300,30 @@ func (c *ClusterSim) Status() map[string]interface{} {
 		}
 	}
 
+	memorySpikeInfo := map[string]interface{}{"active": false}
+	if c.memorySpike != nil {
+		elapsed := time.Since(c.memorySpike.StartTime)
+		remaining := c.memorySpike.Duration - elapsed
+		if remaining < 0 {
+			remaining = 0
+		}
+		memorySpikeInfo = map[string]interface{}{
+			"active":        true,
+			"target_memory": c.memorySpike.TargetMemory,
+			"remaining":     remaining.String(),
+		}
+	}
+
 	return map[string]interface{}{
-		"id":           c.id,
-		"server_count": c.ServerCount(),
-		"base_cpu":     c.baseCPU,
-		"base_memory":  c.baseMemory,
-		"variance":     c.variance,
-		"pattern":       c.pattern.Name(),
-		"spike":        spikeInfo,
+		"id":                 c.id,
+		"server_count":       c.ServerCount(),
+		"base_cpu":           c.baseCPU,
+		"base_memory":        c.baseMemory,
+		"variance":           c.variance,
+		"pattern":            c.pattern.Name(),
+		"spike":              spikeInfo,
+		"memory_spike":       memorySpikeInfo,
+		"memory_correlation": c.memoryCorrelation,
 	}
 }
 

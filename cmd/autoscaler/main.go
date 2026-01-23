@@ -86,8 +86,8 @@ func runServer(cfg *config.Config, db *database.DB) error {
 		logger.Errorf("Failed to start cluster pipelines: %v", err)
 	}
 
-	// Create API server
-	server := api.NewServer(cfg.API, db)
+	// Create API server with orchestrator for dynamic cluster management
+	server := api.NewServer(cfg.API, db, orch)
 
 	// Setup graceful shutdown
 	shutdownChan := make(chan os.Signal, 1)

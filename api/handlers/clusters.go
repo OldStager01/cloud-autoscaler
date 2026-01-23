@@ -5,17 +5,29 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/OldStager01/cloud-autoscaler/internal/collector"
+	"github.com/OldStager01/cloud-autoscaler/internal/scaler"
 	"github.com/OldStager01/cloud-autoscaler/pkg/database/queries"
 	"github.com/OldStager01/cloud-autoscaler/pkg/models"
 	"github.com/gin-gonic/gin"
 )
 
-type ClusterHandler struct {
-	clusterRepo *queries.ClusterRepository
+// ClusterManager interface for orchestrator operations
+type ClusterManager interface {
+	StartCluster(cluster *models.Cluster, coll collector.Collector, scal scaler.Scaler) error
+	StopCluster(clusterID string) error
 }
 
-func NewClusterHandler(clusterRepo *queries.ClusterRepository) *ClusterHandler {
-	return &ClusterHandler{clusterRepo: clusterRepo}
+type ClusterHandler struct {
+	clusterRepo    *queries.ClusterRepository
+	clusterManager ClusterManager
+}
+
+func NewClusterHandler(clusterRepo *queries.ClusterRepository, clusterManager ClusterManager) *ClusterHandler {
+	return &ClusterHandler{
+		clusterRepo:    clusterRepo,
+		clusterManager: clusterManager,
+	}
 }
 
 type CreateClusterRequest struct {
@@ -127,6 +139,30 @@ func (h *ClusterHandler) Create(c *gin.Context) {
 		return
 	}
 
+	// Start monitoring pipeline for the new cluster
+	if h.clusterManager != nil {
+		simulatorURL := "http://localhost:9000/metrics/" + cluster.ID
+		coll := collector.NewHTTPCollector(collector.HTTPCollectorConfig{
+			Endpoint: simulatorURL,
+			Timeout:  5 * time.Second,
+		})
+
+		scal := scaler.NewSimulatorScaler(scaler.SimulatorConfig{
+			ProvisionTime: 3 * time.Second,
+			DrainTimeout:  2 * time.Second,
+		})
+		scal.InitializeCluster(cluster.ID, cluster.MinServers)
+
+		if err := h.clusterManager.StartCluster(cluster, coll, scal); err != nil {
+			// Log error but don't fail the request - cluster is created
+			c.JSON(http.StatusCreated, gin.H{
+				"cluster": toClusterResponse(cluster),
+				"warning": "cluster created but monitoring failed to start: " + err.Error(),
+			})
+			return
+		}
+	}
+
 	c.JSON(http.StatusCreated, toClusterResponse(cluster))
 }
 
@@ -188,6 +224,11 @@ func (h *ClusterHandler) Delete(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
+	// Stop monitoring pipeline first
+	if h.clusterManager != nil {
+		_ = h.clusterManager.StopCluster(id) // Ignore error if not running
+	}
+
 	if err := h.clusterRepo.Delete(ctx, id); err != nil {
 		if err == queries.ErrClusterNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
@@ -197,7 +238,7 @@ func (h *ClusterHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message":  "cluster deleted"})
+	c.JSON(http.StatusOK, gin.H{"message": "cluster deleted"})
 }
 
 func (h *ClusterHandler) GetStatus(c *gin.Context) {
