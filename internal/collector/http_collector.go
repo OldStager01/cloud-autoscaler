@@ -54,7 +54,7 @@ type simulatorServerResponse struct {
 }
 
 func (c *HTTPCollector) Collect(ctx context.Context, clusterID string) (*models.ClusterMetrics, error) {
-	url := fmt.Sprintf("%s/%s", c.endpoint, clusterID)
+	url := c.endpoint
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -95,6 +95,7 @@ func (c *HTTPCollector) Collect(ctx context.Context, clusterID string) (*models.
 	metrics := c.convertResponse(clusterID, &simResp)
 
 	logger.WithCluster(clusterID).Debugf("Collected metrics for %d servers", len(metrics.Servers))
+	logger.WithCluster(clusterID).Infof("Collected Metics: %.2f", metrics.CalculateAggregates().AvgCPU)
 
 	return metrics, nil
 }
