@@ -173,13 +173,28 @@ func (o *Orchestrator) StartCluster(cluster *models.Cluster, coll collector.Coll
 		},
 	})
 
+	// Create cluster-specific decision config using the cluster's min/max server limits
+	clusterDecisionConfig := decision.Config{
+		CooldownPeriod:          o.decisionConfig.CooldownPeriod,
+		ScaleDownCooldownPeriod: o.decisionConfig.ScaleDownCooldownPeriod,
+		SustainedHighDuration:   o.decisionConfig.SustainedHighDuration,
+		SustainedLowDuration:    o.decisionConfig.SustainedLowDuration,
+		EmergencyCPUThreshold:   o.decisionConfig.EmergencyCPUThreshold,
+		MinServers:              cluster.MinServers,  // Use cluster-specific limit
+		MaxServers:              cluster.MaxServers,  // Use cluster-specific limit
+		MaxScaleStep:            o.decisionConfig.MaxScaleStep,
+		TargetCPU:               o.decisionConfig.TargetCPU,
+		CPUHighThreshold:        o.decisionConfig.CPUHighThreshold,
+		CPULowThreshold:         o.decisionConfig.CPULowThreshold,
+	}
+
 	pipeline := NewPipeline(PipelineConfig{
 		ClusterID:         cluster.ID,
 		CollectInterval:  o.config.Collector.Interval,
 		Collector:        resilientColl,
 		Analyzer:         analyzer.New(o.analyzerConfig),
 		SustainedTracker: analyzer.NewSustainedTracker(),
-		DecisionEngine:   decision.NewEngine(o.decisionConfig),
+		DecisionEngine:   decision.NewEngine(clusterDecisionConfig),
 		Scaler:           scal,
 		EventPublisher:   events.NewPublisher(o.eventBus),
 		AnalyzerConfig:   o.analyzerConfig,

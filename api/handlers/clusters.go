@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -21,12 +23,18 @@ type ClusterManager interface {
 type ClusterHandler struct {
 	clusterRepo    *queries.ClusterRepository
 	clusterManager ClusterManager
+	simulatorURL   string
+	httpClient     *http.Client
 }
 
 func NewClusterHandler(clusterRepo *queries.ClusterRepository, clusterManager ClusterManager) *ClusterHandler {
 	return &ClusterHandler{
 		clusterRepo:    clusterRepo,
 		clusterManager: clusterManager,
+		simulatorURL:   "http://localhost:9000",
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
 	}
 }
 
@@ -141,6 +149,9 @@ func (h *ClusterHandler) Create(c *gin.Context) {
 
 	// Start monitoring pipeline for the new cluster
 	if h.clusterManager != nil {
+		// Create cluster in simulator with correct server count
+		h.createInSimulator(cluster.ID, cluster.MinServers)
+
 		simulatorURL := "http://localhost:9000/metrics/" + cluster.ID
 		coll := collector.NewHTTPCollector(collector.HTTPCollectorConfig{
 			Endpoint: simulatorURL,
@@ -229,6 +240,9 @@ func (h *ClusterHandler) Delete(c *gin.Context) {
 		_ = h.clusterManager.StopCluster(id) // Ignore error if not running
 	}
 
+	// Delete from simulator
+	h.deleteFromSimulator(id)
+
 	if err := h.clusterRepo.Delete(ctx, id); err != nil {
 		if err == queries.ErrClusterNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
@@ -239,6 +253,49 @@ func (h *ClusterHandler) Delete(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "cluster deleted"})
+}
+
+// deleteFromSimulator notifies the simulator to delete a cluster
+func (h *ClusterHandler) deleteFromSimulator(clusterID string) {
+	url := h.simulatorURL + "/clusters/" + clusterID
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return
+	}
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+}
+
+// createInSimulator creates a cluster in the simulator with the specified server count
+func (h *ClusterHandler) createInSimulator(clusterID string, serverCount int) {
+	payload := map[string]interface{}{
+		"servers":     serverCount,
+		"base_cpu":    50.0,
+		"base_memory": 60.0,
+		"variance":    10.0,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	url := h.simulatorURL + "/clusters/" + clusterID
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
 }
 
 func (h *ClusterHandler) GetStatus(c *gin.Context) {
