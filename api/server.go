@@ -17,15 +17,16 @@ import (
 )
 
 type Server struct {
-	router      *gin.Engine
-	httpServer  *http.Server
-	config      config.APIConfig
-	db          *database.DB
-	authService *auth.Service
-	wsHub       *websocket.Hub
+	router         *gin.Engine
+	httpServer     *http.Server
+	config         config.APIConfig
+	db             *database.DB
+	authService    *auth.Service
+	wsHub          *websocket.Hub
+	clusterManager handlers.ClusterManager
 }
 
-func NewServer(cfg config.APIConfig, db *database.DB) *Server {
+func NewServer(cfg config.APIConfig, db *database.DB, clusterManager handlers.ClusterManager) *Server {
 	if cfg.JWTSecret == "" || cfg.JWTSecret == "change-me-in-production" {
 		gin.SetMode(gin.DebugMode)
 	} else {
@@ -37,11 +38,12 @@ func NewServer(cfg config.APIConfig, db *database.DB) *Server {
 	wsHub := websocket.NewHub()
 
 	s := &Server{
-		router:       router,
-		config:      cfg,
-		db:           db,
-		authService:  authService,
-		wsHub:       wsHub,
+		router:         router,
+		config:         cfg,
+		db:             db,
+		authService:    authService,
+		wsHub:          wsHub,
+		clusterManager: clusterManager,
 	}
 
 	s.setupMiddleware()
@@ -73,7 +75,7 @@ func (s *Server) setupRoutes() {
 	// Handlers
 	healthHandler := handlers.NewHealthHandler(s.db)
 	authHandler := handlers.NewAuthHandler(userRepo, s.authService)
-	clusterHandler := handlers.NewClusterHandler(clusterRepo)
+	clusterHandler := handlers.NewClusterHandler(clusterRepo, s.clusterManager)
 	metricsHandler := handlers.NewMetricsHandler(metricsRepo, eventsRepo)
 
 	// Public routes

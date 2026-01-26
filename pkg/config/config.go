@@ -72,11 +72,14 @@ type ThresholdConfig struct {
 }
 
 type DecisionConfig struct {
-	CooldownPeriod        time.Duration `mapstructure:"cooldown_period"`
-	EmergencyCPUThreshold float64       `mapstructure:"emergency_cpu_threshold"`
-	MinServers            int           `mapstructure:"min_servers"`
-	MaxServers            int           `mapstructure:"max_servers"`
-	MaxScaleStep          int           `mapstructure:"max_scale_step"`
+	CooldownPeriod          time.Duration `mapstructure:"cooldown_period"`
+	ScaleDownCooldownPeriod time.Duration `mapstructure:"scale_down_cooldown_period"`
+	SustainedHighDuration   time.Duration `mapstructure:"sustained_high_duration"`
+	SustainedLowDuration    time.Duration `mapstructure:"sustained_low_duration"`
+	EmergencyCPUThreshold   float64       `mapstructure:"emergency_cpu_threshold"`
+	MinServers              int           `mapstructure:"min_servers"`
+	MaxServers              int           `mapstructure:"max_servers"`
+	MaxScaleStep            int           `mapstructure:"max_scale_step"`
 }
 
 type PredictorConfig struct {

@@ -9,22 +9,24 @@ import (
 )
 
 type Config struct {
-	CooldownPeriod        time.Duration
-	EmergencyCPUThreshold float64
-	MinServers            int
-	MaxServers            int
-	MaxScaleStep          int
-	TargetCPU             float64
-	CPUHighThreshold      float64
-	CPULowThreshold       float64
-	SustainedHighDuration time.Duration
-	SustainedLowDuration  time.Duration
+	CooldownPeriod          time.Duration
+	ScaleDownCooldownPeriod time.Duration
+	EmergencyCPUThreshold   float64
+	MinServers              int
+	MaxServers              int
+	MaxScaleStep            int
+	TargetCPU               float64
+	CPUHighThreshold        float64
+	CPULowThreshold         float64
+	SustainedHighDuration   time.Duration
+	SustainedLowDuration    time.Duration
 }
 
 type Engine struct {
-	config         Config
-	lastScaleTimes map[string]time.Time
-	mu             sync.RWMutex
+	config             Config
+	lastScaleUpTimes   map[string]time.Time
+	lastScaleDownTimes map[string]time.Time
+	mu                 sync.RWMutex
 }
 
 func NewEngine(cfg Config) *Engine {
@@ -53,15 +55,21 @@ func NewEngine(cfg Config) *Engine {
 		cfg.CPULowThreshold = 30.0
 	}
 	if cfg.SustainedHighDuration == 0 {
-		cfg.SustainedHighDuration = 2 * time.Minute
+		// cfg.SustainedHighDuration = 2 * time.Minute
+		cfg.SustainedHighDuration = 30 * time.Second
 	}
 	if cfg.SustainedLowDuration == 0 {
-		cfg.SustainedLowDuration = 10 * time.Minute
+		cfg.SustainedLowDuration = 30 * time.Second
+	}
+	if cfg.ScaleDownCooldownPeriod == 0 {
+		// cfg.ScaleDownCooldownPeriod = 3 * time.Minute
+		cfg.ScaleDownCooldownPeriod = 30 * time.Second
 	}
 
 	return &Engine{
-		config:         cfg,
-		lastScaleTimes: make(map[string]time.Time),
+		config:             cfg,
+		lastScaleUpTimes:   make(map[string]time.Time),
+		lastScaleDownTimes: make(map[string]time.Time),
 	}
 }
 
@@ -83,23 +91,27 @@ func (e *Engine) Decide(
 		return e.createScaleUpDecision(decision, state, 3, "emergency_cpu_critical", true)
 	}
 
-	// Check cooldown
-	if e.isInCooldown(analyzed.ClusterID) {
-		decision.CooldownActive = true
-		decision.Reason = "in_cooldown"
-		logger.WithCluster(analyzed.ClusterID).Debug("Decision:  maintain (cooldown active)")
-		return decision
-	}
-
-	// Scale up conditions
+	// Scale up conditions (check scale-up cooldown)
 	if scaleUp, reason := e.shouldScaleUp(analyzed, prediction, state); scaleUp {
+		if e.isInScaleUpCooldown(analyzed.ClusterID) {
+			decision.CooldownActive = true
+			decision.Reason = "in_scale_up_cooldown"
+			logger.WithCluster(analyzed.ClusterID).Debug("Decision: maintain (scale-up cooldown active)")
+			return decision
+		}
 		targetDelta := e.calculateScaleUpDelta(analyzed, state)
 		predictionUsed := prediction != nil && reason == "predicted_spike_proactive"
 		return e.createScaleUpDecision(decision, state, targetDelta, reason, false, predictionUsed)
 	}
 
-	// Scale down conditions
+	// Scale down conditions (check scale-down cooldown)
 	if scaleDown, reason := e.shouldScaleDown(analyzed, prediction, state); scaleDown {
+		if e.isInScaleDownCooldown(analyzed.ClusterID) {
+			decision.CooldownActive = true
+			decision.Reason = "in_scale_down_cooldown"
+			logger.WithCluster(analyzed.ClusterID).Debug("Decision: maintain (scale-down cooldown active)")
+			return decision
+		}
 		targetDelta := e.calculateScaleDownDelta(analyzed, state)
 		return e.createScaleDownDecision(decision, state, targetDelta, reason)
 	}
@@ -188,9 +200,10 @@ func (e *Engine) shouldScaleDown(
 		}
 	}
 
-	// Very low CPU with stable/falling trend
-	if analyzed.AvgCPU < e.config.CPULowThreshold && analyzed.Trend == models.TrendFalling {
-		return true, "low_cpu_falling_trend"
+	// Very low CPU with stable or falling trend
+	if analyzed.AvgCPU < e.config.CPULowThreshold && 
+		(analyzed.Trend == models.TrendFalling || analyzed.Trend == models.TrendStable) {
+		return true, "low_cpu_stable_or_falling"
 	}
 
 	return false, ""
@@ -281,11 +294,11 @@ func (e *Engine) createScaleDownDecision(
 	return decision
 }
 
-func (e *Engine) isInCooldown(clusterID string) bool {
+func (e *Engine) isInScaleUpCooldown(clusterID string) bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	lastScale, exists := e.lastScaleTimes[clusterID]
+	lastScale, exists := e.lastScaleUpTimes[clusterID]
 	if !exists {
 		return false
 	}
@@ -293,23 +306,50 @@ func (e *Engine) isInCooldown(clusterID string) bool {
 	return time.Since(lastScale) < e.config.CooldownPeriod
 }
 
-func (e *Engine) RecordScaling(clusterID string) {
+func (e *Engine) isInScaleDownCooldown(clusterID string) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	lastScale, exists := e.lastScaleDownTimes[clusterID]
+	if !exists {
+		return false
+	}
+
+	return time.Since(lastScale) < e.config.ScaleDownCooldownPeriod
+}
+
+func (e *Engine) RecordScaleUp(clusterID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.lastScaleTimes[clusterID] = time.Now()
+	e.lastScaleUpTimes[clusterID] = time.Now()
+}
+
+func (e *Engine) RecordScaleDown(clusterID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.lastScaleDownTimes[clusterID] = time.Now()
+}
+
+func (e *Engine) RecordScaling(clusterID string) {
+	// Legacy method - records both for backward compatibility
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.lastScaleUpTimes[clusterID] = time.Now()
+	e.lastScaleDownTimes[clusterID] = time.Now()
 }
 
 func (e *Engine) ResetCooldown(clusterID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	delete(e.lastScaleTimes, clusterID)
+	delete(e.lastScaleUpTimes, clusterID)
+	delete(e.lastScaleDownTimes, clusterID)
 }
 
 func (e *Engine) GetCooldownRemaining(clusterID string) time.Duration {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	lastScale, exists := e.lastScaleTimes[clusterID]
+	lastScale, exists := e.lastScaleUpTimes[clusterID]
 	if !exists {
 		return 0
 	}

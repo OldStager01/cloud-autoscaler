@@ -18,6 +18,7 @@ import (
 	"github.com/OldStager01/cloud-autoscaler/internal/scaler"
 	"github.com/OldStager01/cloud-autoscaler/pkg/config"
 	"github.com/OldStager01/cloud-autoscaler/pkg/database"
+	"github.com/OldStager01/cloud-autoscaler/pkg/database/queries"
 	"github.com/OldStager01/cloud-autoscaler/pkg/models"
 )
 
@@ -31,7 +32,6 @@ func main() {
 func run() error {
 	configPath := flag.String("config", "", "path to config file")
 	migrate := flag.Bool("migrate", false, "run database migrations")
-	testMultiCluster := flag.Bool("test-multi-cluster", false, "test multi-cluster orchestrator")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -66,10 +66,6 @@ func run() error {
 		return nil
 	}
 
-	if *testMultiCluster {
-		return runMultiClusterTest(cfg, db)
-	}
-
 	return runServer(cfg, db)
 }
 
@@ -85,8 +81,13 @@ func runServer(cfg *config.Config, db *database.DB) error {
 		return fmt.Errorf("failed to start orchestrator: %w", err)
 	}
 
-	// Create API server
-	server := api.NewServer(cfg.API, db)
+	// Load clusters from database and start pipelines
+	if err := startClusterPipelines(cfg, db, orch); err != nil {
+		logger.Errorf("Failed to start cluster pipelines: %v", err)
+	}
+
+	// Create API server with orchestrator for dynamic cluster management
+	server := api.NewServer(cfg.API, db, orch)
 
 	// Setup graceful shutdown
 	shutdownChan := make(chan os.Signal, 1)
@@ -121,132 +122,55 @@ func runServer(cfg *config.Config, db *database.DB) error {
 	// Then shutdown API server
 	logger.Info("Stopping API server...")
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Errorf("API server shutdown error: %v", err)
+		logger.Errorf("API server shutdown error:  %v", err)
 	}
 
 	logger.Info("Shutdown complete")
 	return nil
 }
 
-func runMultiClusterTest(cfg *config.Config, db *database.DB) error {
-	logger.Info("Running multi-cluster test")
+func startClusterPipelines(cfg *config.Config, db *database.DB, orch *orchestrator.Orchestrator) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// Start Prometheus metrics server
-	if cfg.Prometheus.Enabled {
-		metrics.StartServer(cfg.Prometheus.Port)
+	// Get active clusters from database
+	clusterRepo := queries.NewClusterRepository(db.DB)
+	clusters, err := clusterRepo.GetAll(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch clusters: %w", err)
 	}
 
-	// Create orchestrator
-	orch := orchestrator.New(cfg, db)
-	if err := orch.Start(); err != nil {
-		return fmt.Errorf("failed to start orchestrator: %w", err)
-	}
+	logger.Infof("Found %d clusters in database", len(clusters))
 
-	// Subscribe to events
-	eventChan := orch.SubscribeAllEvents()
-	go func() {
-		for event := range eventChan {
-			logger.Infof("[EVENT] %s:  %s (cluster: %s)",
-				event.Type, event.Message, event.ClusterID[: 8])
+	for _, cluster := range clusters {
+		if cluster.Status != models.ClusterStatusActive {
+			logger.Infof("Skipping cluster %s (status: %s)", cluster.Name, cluster.Status)
+			continue
 		}
-	}()
 
-	// Define test clusters (using seeded IDs)
-	clusters := []*models.Cluster{
-		{
-			ID:         "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
-			Name:       "web-production",
-			MinServers: 2,
-			MaxServers: 10,
-			Status:     models.ClusterStatusActive,
-		},
-		{
-			ID:          "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22",
-			Name:       "api-production",
-			MinServers: 2,
-			MaxServers: 10,
-			Status:     models.ClusterStatusActive,
-		},
-	}
+		// Create HTTP collector pointing to simulator
+		simulatorURL := fmt.Sprintf("http://localhost:9000/metrics/%s", cluster.ID)
+		coll := collector.NewHTTPCollector(collector.HTTPCollectorConfig{
+			Endpoint:  simulatorURL,
+			Timeout: 5 * time.Second,
+		})
 
-	// Create mock collectors with different behaviors
-	mockCollectors := map[string]*collector.MockCollector{
-		clusters[0].ID: collector.NewMockCollector(collector.MockCollectorConfig{
-			BaseCPU:    55.0,
-			BaseMemory: 60.0,
-			Variance:   10.0,
-		}),
-		clusters[1].ID: collector.NewMockCollector(collector.MockCollectorConfig{
-			BaseCPU:     40.0,
-			BaseMemory: 50.0,
-			Variance:   5.0,
-		}),
-	}
-
-	// Initialize clusters
-	for _, cluster := range clusters {
-		mockCollectors[cluster.ID].SetClusterServers(cluster.ID, 3)
-	}
-
-	// Create scalers
-	scalers := make(map[string]*scaler.SimulatorScaler)
-	for _, cluster := range clusters {
-		scalers[cluster.ID] = scaler.NewSimulatorScaler(scaler.SimulatorConfig{
+		// Create simulator scaler
+		scal := scaler.NewSimulatorScaler(scaler.SimulatorConfig{
 			ProvisionTime: 3 * time.Second,
 			DrainTimeout:  2 * time.Second,
 		})
-		scalers[cluster.ID].InitializeCluster(cluster.ID, 3)
-	}
+		scal.InitializeCluster(cluster.ID, cluster.MinServers)
 
-	// Start all clusters
-	for _, cluster := range clusters {
-		if err := orch.StartCluster(cluster, mockCollectors[cluster.ID], scalers[cluster.ID]); err != nil {
+		// Start cluster pipeline
+		if err := orch.StartCluster(cluster, coll, scal); err != nil {
 			logger.Errorf("Failed to start cluster %s: %v", cluster.Name, err)
+			continue
 		}
+
+		logger.Infof("Started pipeline for cluster:  %s", cluster.Name)
 	}
 
-	logger.Infof("Started %d clusters", orch.ClusterCount())
-
-	// Phase 1: Normal operation
-	logger.Info("=== Phase 1: Normal operation (15 seconds) ===")
-	time.Sleep(15 * time.Second)
-
-	// Phase 2: Simulate high load on web cluster only
-	logger.Info("=== Phase 2: High load on web-production (15 seconds) ===")
-	mockCollectors[clusters[0].ID].SetBaseCPU(88.0)
-	time.Sleep(15 * time.Second)
-
-	// Phase 3: Both clusters high load
-	logger.Info("=== Phase 3: High load on both clusters (15 seconds) ===")
-	mockCollectors[clusters[1].ID].SetBaseCPU(85.0)
-	time.Sleep(15 * time.Second)
-
-	// Phase 4: Back to normal
-	logger.Info("=== Phase 4: Back to normal (10 seconds) ===")
-	mockCollectors[clusters[0].ID].SetBaseCPU(50.0)
-	mockCollectors[clusters[1].ID].SetBaseCPU(45.0)
-	time.Sleep(10 * time.Second)
-
-	// Print final states
-	logger.Info("=== Final Cluster States ===")
-	for _, cluster := range clusters {
-		state, _ := scalers[cluster.ID].GetClusterState(context.Background(), cluster.ID)
-		logger.Infof("Cluster %s: active=%d, provisioning=%d, draining=%d",
-			cluster.Name, state.ActiveServers, state.ProvisioningCnt, state.DrainingCount)
-	}
-
-	// Check Prometheus metrics
-	logger.Infof("Prometheus metrics available at http://localhost:%d/metrics", cfg.Prometheus.Port)
-
-	// Graceful shutdown
-	logger.Info("Initiating graceful shutdown...")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := orch.Stop(ctx); err != nil {
-		logger.Errorf("Shutdown error: %v", err)
-	}
-
-	logger.Info("Multi-cluster test completed")
+	logger.Infof("Started %d cluster pipelines", orch.ClusterCount())
 	return nil
 }

@@ -89,7 +89,7 @@ func (b *EventBus) Close() {
 
 	for _, subscribers := range b.subscribers {
 		for _, ch := range subscribers {
-			if ! closedChans[ch] {
+			if !closedChans[ch] {
 				close(ch)
 				closedChans[ch] = true
 			}

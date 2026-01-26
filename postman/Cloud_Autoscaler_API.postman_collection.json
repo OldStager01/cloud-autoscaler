@@ -1,0 +1,709 @@
+{
+  "info": {
+    "_postman_id": "cloud-autoscaler-api",
+    "name": "Cloud Autoscaler API",
+    "description": "Complete API collection for Cloud Autoscaler - A Kubernetes-style cloud autoscaling system.\n\n## Authentication\nMost endpoints require JWT authentication. Use the Login endpoint to get a token, then set it in the Authorization header as `Bearer <token>`.\n\n## Base URL\nDefault: `http://localhost:8080`\n\n## Rate Limiting\nDefault: 100 requests per minute",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cluster_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "description": "Health check endpoints for monitoring service availability",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Complete health check including database connectivity status"
+          },
+          "response": [
+            {
+              "name": "Healthy Response",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"status\": \"healthy\",\n    \"timestamp\": \"2026-01-23T10:00:00Z\",\n    \"checks\": {\n        \"database\": \"healthy\"\n    }\n}"
+            },
+            {
+              "name": "Unhealthy Response",
+              "status": "Service Unavailable",
+              "code": 503,
+              "body": "{\n    \"status\": \"unhealthy\",\n    \"timestamp\": \"2026-01-23T10:00:00Z\",\n    \"checks\": {\n        \"database\": \"unhealthy: connection refused\"\n    }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Readiness Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health/ready",
+              "host": ["{{base_url}}"],
+              "path": ["health", "ready"]
+            },
+            "description": "Kubernetes readiness probe - checks if service is ready to accept traffic"
+          },
+          "response": [
+            {
+              "name": "Ready Response",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"status\": \"ready\",\n    \"timestamp\": \"2026-01-23T10:00:00Z\"\n}"
+            },
+            {
+              "name": "Not Ready Response",
+              "status": "Service Unavailable",
+              "code": 503,
+              "body": "{\n    \"status\": \"not ready\",\n    \"timestamp\": \"2026-01-23T10:00:00Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Liveness Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health/live",
+              "host": ["{{base_url}}"],
+              "path": ["health", "live"]
+            },
+            "description": "Kubernetes liveness probe - checks if service is alive"
+          },
+          "response": [
+            {
+              "name": "Alive Response",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"status\": \"alive\",\n    \"timestamp\": \"2026-01-23T10:00:00Z\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "description": "User authentication endpoints",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('jwt_token', jsonData.token);",
+                  "    console.log('JWT token saved to collection variables');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"admin\",\n    \"password\": \"admin123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Authenticate user and receive JWT token. Token expires in 24 hours (86400 seconds)."
+          },
+          "response": [
+            {
+              "name": "Successful Login",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJ1c2VybmFtZSI6ImFkbWluIiwiZXhwIjoxNzA2MTgyNDAwfQ.xxxx\",\n    \"expires_in\": 86400,\n    \"username\": \"admin\"\n}"
+            },
+            {
+              "name": "Invalid Credentials",
+              "status": "Unauthorized",
+              "code": 401,
+              "body": "{\n    \"error\": \"invalid credentials\"\n}"
+            },
+            {
+              "name": "Bad Request",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n    \"error\": \"invalid request body\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Clusters",
+      "description": "Cluster management endpoints - CRUD operations for autoscaling clusters",
+      "item": [
+        {
+          "name": "List All Clusters",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clusters",
+              "host": ["{{base_url}}"],
+              "path": ["clusters"]
+            },
+            "description": "Retrieve all clusters with their configurations"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"clusters\": [\n        {\n            \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n            \"name\": \"production-cluster\",\n            \"min_servers\": 2,\n            \"max_servers\": 20,\n            \"status\": \"active\",\n            \"config\": {\n                \"collector_endpoint\": \"http://metrics:9000/metrics\",\n                \"target_cpu\": 70.0\n            },\n            \"created_at\": \"2026-01-20T10:00:00Z\",\n            \"updated_at\": \"2026-01-23T08:30:00Z\"\n        }\n    ],\n    \"count\": 1\n}"
+            },
+            {
+              "name": "Unauthorized",
+              "status": "Unauthorized",
+              "code": 401,
+              "body": "{\n    \"error\": \"missing authorization header\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Cluster",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('cluster_id', jsonData.id);",
+                  "    console.log('Cluster ID saved: ' + jsonData.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"production-cluster\",\n    \"min_servers\": 2,\n    \"max_servers\": 20,\n    \"config\": {\n        \"collector_endpoint\": \"http://metrics-server:9000/metrics\",\n        \"target_cpu\": 70.0\n    }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/clusters",
+              "host": ["{{base_url}}"],
+              "path": ["clusters"]
+            },
+            "description": "Create a new autoscaling cluster.\n\n**Required Fields:**\n- `name`: Cluster name (1-100 characters)\n- `min_servers`: Minimum server count (>= 1)\n- `max_servers`: Maximum server count (>= min_servers)\n\n**Optional Fields:**\n- `config.collector_endpoint`: Metrics collection endpoint\n- `config.target_cpu`: Target CPU utilization percentage"
+          },
+          "response": [
+            {
+              "name": "Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"name\": \"production-cluster\",\n    \"min_servers\": 2,\n    \"max_servers\": 20,\n    \"status\": \"active\",\n    \"config\": {\n        \"collector_endpoint\": \"http://metrics-server:9000/metrics\",\n        \"target_cpu\": 70.0\n    },\n    \"created_at\": \"2026-01-23T10:00:00Z\",\n    \"updated_at\": \"2026-01-23T10:00:00Z\"\n}"
+            },
+            {
+              "name": "Validation Error",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n    \"error\": \"max_servers must be >= min_servers\"\n}"
+            },
+            {
+              "name": "Duplicate Name",
+              "status": "Conflict",
+              "code": 409,
+              "body": "{\n    \"error\": \"cluster with this name already exists\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Cluster by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clusters/{{cluster_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["clusters", "{{cluster_id}}"]
+            },
+            "description": "Retrieve a specific cluster by its ID"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"name\": \"production-cluster\",\n    \"min_servers\": 2,\n    \"max_servers\": 20,\n    \"status\": \"active\",\n    \"config\": {\n        \"collector_endpoint\": \"http://metrics-server:9000/metrics\",\n        \"target_cpu\": 70.0\n    },\n    \"created_at\": \"2026-01-23T10:00:00Z\",\n    \"updated_at\": \"2026-01-23T10:00:00Z\"\n}"
+            },
+            {
+              "name": "Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{\n    \"error\": \"cluster not found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Cluster",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"production-cluster-v2\",\n    \"min_servers\": 3,\n    \"max_servers\": 25,\n    \"status\": \"active\",\n    \"config\": {\n        \"collector_endpoint\": \"http://new-metrics:9000/metrics\",\n        \"target_cpu\": 75.0\n    }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/clusters/{{cluster_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["clusters", "{{cluster_id}}"]
+            },
+            "description": "Update an existing cluster. All fields are optional - only provided fields will be updated.\n\n**Optional Fields:**\n- `name`: New cluster name\n- `min_servers`: New minimum server count\n- `max_servers`: New maximum server count\n- `status`: Cluster status (`active` or `paused`)\n- `config`: Configuration object"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"name\": \"production-cluster-v2\",\n    \"min_servers\": 3,\n    \"max_servers\": 25,\n    \"status\": \"active\",\n    \"config\": {\n        \"collector_endpoint\": \"http://new-metrics:9000/metrics\",\n        \"target_cpu\": 75.0\n    },\n    \"created_at\": \"2026-01-23T10:00:00Z\",\n    \"updated_at\": \"2026-01-23T12:30:00Z\"\n}"
+            },
+            {
+              "name": "Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{\n    \"error\": \"cluster not found\"\n}"
+            },
+            {
+              "name": "Validation Error",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n    \"error\": \"max_servers must be >= min_servers\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Cluster",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clusters/{{cluster_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["clusters", "{{cluster_id}}"]
+            },
+            "description": "Delete a cluster by its ID"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"message\": \"cluster deleted\"\n}"
+            },
+            {
+              "name": "Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{\n    \"error\": \"cluster not found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Cluster Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clusters/{{cluster_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["clusters", "{{cluster_id}}", "status"]
+            },
+            "description": "Get detailed status of a cluster including server counts by state"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"name\": \"production-cluster\",\n    \"status\": \"active\",\n    \"servers\": {\n        \"total\": 5,\n        \"active\": 4,\n        \"provisioning\": 1,\n        \"draining\": 0\n    }\n}"
+            },
+            {
+              "name": "Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{\n    \"error\": \"cluster not found\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Metrics",
+      "description": "Cluster metrics and monitoring endpoints",
+      "item": [
+        {
+          "name": "Get Metrics (Raw)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clusters/{{cluster_id}}/metrics?from=2026-01-23T00:00:00Z&to=2026-01-23T23:59:59Z&limit=100",
+              "host": ["{{base_url}}"],
+              "path": ["clusters", "{{cluster_id}}", "metrics"],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-23T00:00:00Z",
+                  "description": "Start time (RFC3339 format)"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-01-23T23:59:59Z",
+                  "description": "End time (RFC3339 format)"
+                },
+                {
+                  "key": "limit",
+                  "value": "100",
+                  "description": "Maximum results (1-1000, default: 100)"
+                }
+              ]
+            },
+            "description": "Retrieve raw metrics data for a cluster within a time range.\n\n**Query Parameters:**\n- `from`: Start timestamp (RFC3339)\n- `to`: End timestamp (RFC3339)\n- `range`: Relative time range (e.g., `1h`, `24h`, `7d`)\n- `limit`: Max results (default: 100, max: 1000)"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"from\": \"2026-01-23T00:00:00Z\",\n    \"to\": \"2026-01-23T23:59:59Z\",\n    \"aggregated\": false,\n    \"data\": [\n        {\n            \"time\": \"2026-01-23T10:00:00Z\",\n            \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n            \"server_id\": \"server-1\",\n            \"cpu_usage\": 65.5,\n            \"memory_usage\": 72.3,\n            \"request_load\": 1500\n        },\n        {\n            \"time\": \"2026-01-23T10:00:00Z\",\n            \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n            \"server_id\": \"server-2\",\n            \"cpu_usage\": 58.2,\n            \"memory_usage\": 68.1,\n            \"request_load\": 1200\n        }\n    ],\n    \"count\": 2\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Metrics (Aggregated)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clusters/{{cluster_id}}/metrics?aggregated=true&range=1h&bucket=5",
+              "host": ["{{base_url}}"],
+              "path": ["clusters", "{{cluster_id}}", "metrics"],
+              "query": [
+                {
+                  "key": "aggregated",
+                  "value": "true",
+                  "description": "Enable aggregation"
+                },
+                {
+                  "key": "range",
+                  "value": "1h",
+                  "description": "Time range (1h, 24h, 7d)"
+                },
+                {
+                  "key": "bucket",
+                  "value": "5",
+                  "description": "Aggregation bucket in minutes"
+                }
+              ]
+            },
+            "description": "Retrieve aggregated metrics with time buckets.\n\n**Query Parameters:**\n- `aggregated`: Set to `true` for aggregated data\n- `bucket`: Time bucket size in minutes (default: 5)\n- `range`: Relative time range (e.g., `1h`, `24h`, `7d`)"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"from\": \"2026-01-23T09:00:00Z\",\n    \"to\": \"2026-01-23T10:00:00Z\",\n    \"aggregated\": true,\n    \"bucket_minutes\": 5,\n    \"data\": [\n        {\n            \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n            \"timestamp\": \"2026-01-23T09:00:00Z\",\n            \"avg_cpu\": 62.5,\n            \"avg_memory\": 70.2,\n            \"avg_load\": 1350.5,\n            \"max_cpu\": 78.3,\n            \"min_cpu\": 45.2,\n            \"server_count\": 5,\n            \"active_servers\": 5\n        },\n        {\n            \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n            \"timestamp\": \"2026-01-23T09:05:00Z\",\n            \"avg_cpu\": 68.1,\n            \"avg_memory\": 71.8,\n            \"avg_load\": 1520.0,\n            \"max_cpu\": 82.5,\n            \"min_cpu\": 52.3,\n            \"server_count\": 5,\n            \"active_servers\": 5\n        }\n    ],\n    \"count\": 2\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Latest Metrics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clusters/{{cluster_id}}/metrics/latest",
+              "host": ["{{base_url}}"],
+              "path": ["clusters", "{{cluster_id}}", "metrics", "latest"]
+            },
+            "description": "Get the most recent metrics snapshot for a cluster"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"timestamp\": \"2026-01-23T10:05:00Z\",\n    \"avg_cpu\": 65.3,\n    \"avg_memory\": 71.2,\n    \"avg_load\": 1420.5,\n    \"max_cpu\": 79.8,\n    \"min_cpu\": 48.5,\n    \"server_count\": 5,\n    \"active_servers\": 5\n}"
+            },
+            {
+              "name": "No Metrics Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{\n    \"error\": \"no recent metrics found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Hourly Metrics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clusters/{{cluster_id}}/metrics/hourly?range=24h",
+              "host": ["{{base_url}}"],
+              "path": ["clusters", "{{cluster_id}}", "metrics", "hourly"],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "24h",
+                  "description": "Time range (e.g., 24h, 7d)"
+                }
+              ]
+            },
+            "description": "Get hourly aggregated metrics for trend analysis.\n\n**Query Parameters:**\n- `from`: Start timestamp (RFC3339)\n- `to`: End timestamp (RFC3339)\n- `range`: Relative time range"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"from\": \"2026-01-22T10:00:00Z\",\n    \"to\": \"2026-01-23T10:00:00Z\",\n    \"data\": [\n        {\n            \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n            \"timestamp\": \"2026-01-22T10:00:00Z\",\n            \"avg_cpu\": 55.2,\n            \"avg_memory\": 62.1,\n            \"avg_load\": 980.5,\n            \"max_cpu\": 72.3,\n            \"min_cpu\": 35.8,\n            \"server_count\": 4,\n            \"active_servers\": 4\n        },\n        {\n            \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n            \"timestamp\": \"2026-01-22T11:00:00Z\",\n            \"avg_cpu\": 78.5,\n            \"avg_memory\": 75.3,\n            \"avg_load\": 2100.0,\n            \"max_cpu\": 92.1,\n            \"min_cpu\": 65.2,\n            \"server_count\": 6,\n            \"active_servers\": 6\n        }\n    ],\n    \"count\": 2\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Scaling Events",
+      "description": "Scaling event history and statistics",
+      "item": [
+        {
+          "name": "Get Cluster Scaling Events",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clusters/{{cluster_id}}/events?range=24h&limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["clusters", "{{cluster_id}}", "events"],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "24h",
+                  "description": "Time range (1h, 24h, 7d)"
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Maximum results (default: 50)"
+                }
+              ]
+            },
+            "description": "Get scaling event history for a specific cluster.\n\n**Query Parameters:**\n- `from`: Start timestamp (RFC3339)\n- `to`: End timestamp (RFC3339)\n- `range`: Relative time range\n- `limit`: Max results (default: 50, max: 1000)"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"from\": \"2026-01-22T10:00:00Z\",\n    \"to\": \"2026-01-23T10:00:00Z\",\n    \"data\": [\n        {\n            \"id\": 1,\n            \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n            \"timestamp\": \"2026-01-23T09:30:00Z\",\n            \"action\": \"scale_up\",\n            \"servers_before\": 4,\n            \"servers_after\": 6,\n            \"trigger_reason\": \"CPU threshold exceeded (85% > 80%)\",\n            \"prediction_used\": false,\n            \"status\": \"success\"\n        },\n        {\n            \"id\": 2,\n            \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n            \"timestamp\": \"2026-01-23T08:15:00Z\",\n            \"action\": \"scale_down\",\n            \"servers_before\": 5,\n            \"servers_after\": 4,\n            \"trigger_reason\": \"Low utilization (25% < 30%)\",\n            \"prediction_used\": true,\n            \"confidence\": 0.85,\n            \"status\": \"success\"\n        }\n    ],\n    \"count\": 2\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Scaling Statistics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/clusters/{{cluster_id}}/events/stats?range=7d",
+              "host": ["{{base_url}}"],
+              "path": ["clusters", "{{cluster_id}}", "events", "stats"],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "7d",
+                  "description": "Time range for statistics"
+                }
+              ]
+            },
+            "description": "Get aggregated scaling statistics for a cluster.\n\n**Query Parameters:**\n- `from`: Start timestamp (RFC3339)\n- `to`: End timestamp (RFC3339)\n- `range`: Relative time range"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"period\": {\n        \"from\": \"2026-01-16T10:00:00Z\",\n        \"to\": \"2026-01-23T10:00:00Z\"\n    },\n    \"total_events\": 45,\n    \"scale_ups\": 28,\n    \"scale_downs\": 17,\n    \"successful\": 43,\n    \"failed\": 2,\n    \"prediction_assisted\": 15,\n    \"avg_prediction_confidence\": 0.82\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Recent Events (All Clusters)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/events/recent?limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["events", "recent"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Maximum results (default: 20)"
+                }
+              ]
+            },
+            "description": "Get recent scaling events across all clusters.\n\n**Query Parameters:**\n- `limit`: Max results (default: 20, max: 1000)"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n    \"data\": [\n        {\n            \"id\": 1,\n            \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n            \"timestamp\": \"2026-01-23T09:30:00Z\",\n            \"action\": \"scale_up\",\n            \"servers_before\": 4,\n            \"servers_after\": 6,\n            \"trigger_reason\": \"CPU threshold exceeded\",\n            \"prediction_used\": false,\n            \"status\": \"success\"\n        },\n        {\n            \"id\": 2,\n            \"cluster_id\": \"660e8400-e29b-41d4-a716-446655440001\",\n            \"timestamp\": \"2026-01-23T09:25:00Z\",\n            \"action\": \"scale_down\",\n            \"servers_before\": 8,\n            \"servers_after\": 6,\n            \"trigger_reason\": \"Low utilization\",\n            \"prediction_used\": true,\n            \"confidence\": 0.78,\n            \"status\": \"success\"\n        }\n    ],\n    \"count\": 2\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "WebSocket",
+      "description": "Real-time WebSocket connection for live updates",
+      "item": [
+        {
+          "name": "WebSocket Connection",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ws",
+              "host": ["{{base_url}}"],
+              "path": ["ws"]
+            },
+            "description": "WebSocket endpoint for real-time updates.\n\n**Connection URL:**\n`ws://localhost:8080/ws`\n\n**Message Format (Client -> Server):**\n```json\n{\n    \"type\": \"subscribe\",\n    \"cluster_id\": \"550e8400-e29b-41d4-a716-446655440000\"\n}\n```\n\n**Message Types:**\n- `subscribe`: Subscribe to cluster updates\n- `unsubscribe`: Unsubscribe from cluster updates\n\n**Server Events:**\n- `metrics_update`: New metrics received\n- `scaling_event`: Scaling action occurred\n- `cluster_status`: Cluster status changed\n\n**Note:** This endpoint uses WebSocket protocol. Use a WebSocket client (not HTTP) to connect."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt_token}}",
+        "type": "string"
+      }
+    ]
+  }
+}

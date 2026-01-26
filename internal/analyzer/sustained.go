@@ -26,18 +26,21 @@ func (t *SustainedTracker) Update(clusterID string, analyzed *models.AnalyzedMet
 
 	now := time.Now()
 
+	// Track high CPU: start when above threshold, clear when below
 	if analyzed.AvgCPU >= cfg.CPUHighThreshold {
 		if _, exists := t.highStartTimes[clusterID]; !exists {
 			t.highStartTimes[clusterID] = now
 		}
-		delete(t.lowStartTimes, clusterID)
-	} else if analyzed.AvgCPU <= cfg.CPULowThreshold {
+	} else {
+		delete(t.highStartTimes, clusterID)
+	}
+
+	// Track low CPU: start when below threshold, clear when above
+	if analyzed.AvgCPU <= cfg.CPULowThreshold {
 		if _, exists := t.lowStartTimes[clusterID]; !exists {
 			t.lowStartTimes[clusterID] = now
 		}
-		delete(t.highStartTimes, clusterID)
 	} else {
-		delete(t.highStartTimes, clusterID)
 		delete(t.lowStartTimes, clusterID)
 	}
 

@@ -122,7 +122,7 @@ func (t *StateTracker) GetClusterState(clusterID string) *models.ClusterState {
 	serverIDs := t.clusters[clusterID]
 	for _, id := range serverIDs {
 		server, exists := t.servers[id]
-		if ! exists {
+		if !exists {
 			continue
 		}
 
@@ -194,7 +194,7 @@ func (t *StateTracker) CleanupTerminated(clusterID string) int {
 
 	for _, id := range serverIDs {
 		server, exists := t.servers[id]
-		if ! exists {
+		if !exists {
 			continue
 		}
 
@@ -221,7 +221,7 @@ func (t *StateTracker) WaitForActivation(ctx context.Context, serverID string) e
 			return ctx.Err()
 		case <-ticker.C:
 			server, exists := t.GetServer(serverID)
-			if ! exists {
+			if !exists {
 				return ErrClusterNotFound
 			}
 			if server.State == models.ServerStateActive {

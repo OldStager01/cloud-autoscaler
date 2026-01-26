@@ -50,13 +50,16 @@ func New(cfg *config.Config, db *database.DB) *Orchestrator {
 	}
 
 	decisionCfg := decision.Config{
-		CooldownPeriod:         cfg.Decision.CooldownPeriod,
-		EmergencyCPUThreshold: cfg.Decision.EmergencyCPUThreshold,
-		MinServers:            cfg.Decision.MinServers,
-		MaxServers:             cfg.Decision.MaxServers,
-		MaxScaleStep:          cfg.Decision.MaxScaleStep,
-		CPUHighThreshold:      cfg.Analyzer.Thresholds.CPUHigh,
-		CPULowThreshold:       cfg.Analyzer.Thresholds.CPULow,
+		CooldownPeriod:          cfg.Decision.CooldownPeriod,
+		ScaleDownCooldownPeriod: cfg.Decision.ScaleDownCooldownPeriod,
+		SustainedHighDuration:   cfg.Decision.SustainedHighDuration,
+		SustainedLowDuration:    cfg.Decision.SustainedLowDuration,
+		EmergencyCPUThreshold:   cfg.Decision.EmergencyCPUThreshold,
+		MinServers:              cfg.Decision.MinServers,
+		MaxServers:              cfg.Decision.MaxServers,
+		MaxScaleStep:            cfg.Decision.MaxScaleStep,
+		CPUHighThreshold:        cfg.Analyzer.Thresholds.CPUHigh,
+		CPULowThreshold:         cfg.Analyzer.Thresholds.CPULow,
 	}
 
 	return &Orchestrator{
@@ -170,13 +173,28 @@ func (o *Orchestrator) StartCluster(cluster *models.Cluster, coll collector.Coll
 		},
 	})
 
+	// Create cluster-specific decision config using the cluster's min/max server limits
+	clusterDecisionConfig := decision.Config{
+		CooldownPeriod:          o.decisionConfig.CooldownPeriod,
+		ScaleDownCooldownPeriod: o.decisionConfig.ScaleDownCooldownPeriod,
+		SustainedHighDuration:   o.decisionConfig.SustainedHighDuration,
+		SustainedLowDuration:    o.decisionConfig.SustainedLowDuration,
+		EmergencyCPUThreshold:   o.decisionConfig.EmergencyCPUThreshold,
+		MinServers:              cluster.MinServers,
+		MaxServers:              cluster.MaxServers,
+		MaxScaleStep:            o.decisionConfig.MaxScaleStep,
+		TargetCPU:               o.decisionConfig.TargetCPU,
+		CPUHighThreshold:        o.decisionConfig.CPUHighThreshold,
+		CPULowThreshold:         o.decisionConfig.CPULowThreshold,
+	}
+
 	pipeline := NewPipeline(PipelineConfig{
 		ClusterID:         cluster.ID,
 		CollectInterval:  o.config.Collector.Interval,
 		Collector:        resilientColl,
 		Analyzer:         analyzer.New(o.analyzerConfig),
 		SustainedTracker: analyzer.NewSustainedTracker(),
-		DecisionEngine:   decision.NewEngine(o.decisionConfig),
+		DecisionEngine:   decision.NewEngine(clusterDecisionConfig),
 		Scaler:           scal,
 		EventPublisher:   events.NewPublisher(o.eventBus),
 		AnalyzerConfig:   o.analyzerConfig,
@@ -197,7 +215,7 @@ func (o *Orchestrator) StopCluster(clusterID string) error {
 	defer o.mu.Unlock()
 
 	pipeline, exists := o.pipelines[clusterID]
-	if ! exists {
+	if !exists {
 		return fmt.Errorf("no pipeline found for cluster %s", clusterID)
 	}
 
