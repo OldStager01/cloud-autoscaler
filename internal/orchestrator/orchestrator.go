@@ -180,8 +180,8 @@ func (o *Orchestrator) StartCluster(cluster *models.Cluster, coll collector.Coll
 		SustainedHighDuration:   o.decisionConfig.SustainedHighDuration,
 		SustainedLowDuration:    o.decisionConfig.SustainedLowDuration,
 		EmergencyCPUThreshold:   o.decisionConfig.EmergencyCPUThreshold,
-		MinServers:              cluster.MinServers,  // Use cluster-specific limit
-		MaxServers:              cluster.MaxServers,  // Use cluster-specific limit
+		MinServers:              cluster.MinServers,
+		MaxServers:              cluster.MaxServers,
 		MaxScaleStep:            o.decisionConfig.MaxScaleStep,
 		TargetCPU:               o.decisionConfig.TargetCPU,
 		CPUHighThreshold:        o.decisionConfig.CPUHighThreshold,
@@ -215,7 +215,7 @@ func (o *Orchestrator) StopCluster(clusterID string) error {
 	defer o.mu.Unlock()
 
 	pipeline, exists := o.pipelines[clusterID]
-	if ! exists {
+	if !exists {
 		return fmt.Errorf("no pipeline found for cluster %s", clusterID)
 	}
 

@@ -75,7 +75,7 @@ func NewCircuitBreaker(cfg CircuitBreakerConfig) *CircuitBreaker {
 }
 
 func (cb *CircuitBreaker) Execute(fn func() error) error {
-	if ! cb.canExecute() {
+	if !cb.canExecute() {
 		return ErrCircuitOpen
 	}
 

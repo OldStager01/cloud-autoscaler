@@ -187,7 +187,7 @@ func writeMetric(w http.ResponseWriter, name string, labels map[string]string, v
 		labelStr = "{"
 		first := true
 		for k, v := range labels {
-			if ! first {
+			if !first {
 				labelStr += ","
 			}
 			labelStr += k + `="` + v + `"`
