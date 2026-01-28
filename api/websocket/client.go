@@ -123,10 +123,34 @@ func (c *Client) handleMessage(msg *IncomingMessage) {
 		if msg.ClusterID != "" {
 			c.clusterID = msg.ClusterID
 			logger.Infof("Client subscribed to cluster: %s", msg.ClusterID)
+			// Send subscription confirmation
+			c.sendConfirmation("subscribed", msg.ClusterID)
 		}
-	case "unsubscribe": 
+	case "unsubscribe":
+		oldClusterID := c.clusterID
 		c.clusterID = ""
 		logger.Info("Client unsubscribed from cluster")
+		// Send unsubscription confirmation
+		c.sendConfirmation("unsubscribed", oldClusterID)
+	}
+}
+
+func (c *Client) sendConfirmation(action, clusterID string) {
+	confirmation := map[string]interface{}{
+		"type":       "subscription_update",
+		"action":     action,
+		"cluster_id": clusterID,
+		"timestamp":  time.Now(),
+	}
+	data, err := json.Marshal(confirmation)
+	if err != nil {
+		logger.Errorf("Failed to marshal confirmation: %v", err)
+		return
+	}
+	select {
+	case c.send <- data:
+	default:
+		logger.Warn("Client send channel full, dropping confirmation")
 	}
 }
 

@@ -23,6 +23,7 @@ type Server struct {
 	db             *database.DB
 	authService    *auth.Service
 	wsHub          *websocket.Hub
+	wsBridge       *websocket.EventBridge
 	clusterManager handlers.ClusterManager
 }
 
@@ -51,6 +52,13 @@ func NewServer(cfg config.APIConfig, db *database.DB, clusterManager handlers.Cl
 
 	// Start WebSocket hub
 	go wsHub.Run()
+
+	// Start event bridge to forward orchestrator events to WebSocket clients
+	if clusterManager != nil {
+		eventsChan := clusterManager.SubscribeAllEvents()
+		s.wsBridge = websocket.NewEventBridge(wsHub, eventsChan)
+		s.wsBridge.Start()
+	}
 
 	return s
 }
@@ -128,6 +136,11 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	// Stop the event bridge first
+	if s.wsBridge != nil {
+		s.wsBridge.Stop()
+	}
+
 	if s.httpServer == nil {
 		return nil
 	}

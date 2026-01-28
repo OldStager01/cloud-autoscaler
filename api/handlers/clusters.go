@@ -18,6 +18,7 @@ import (
 type ClusterManager interface {
 	StartCluster(cluster *models.Cluster, coll collector.Collector, scal scaler.Scaler) error
 	StopCluster(clusterID string) error
+	SubscribeAllEvents() <-chan *models.Event
 }
 
 type ClusterHandler struct {
