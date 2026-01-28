@@ -31,7 +31,7 @@ func (h *HealthHandler) Health(c *gin.Context) {
 	status := "healthy"
 
 	// Check database
-	if err := h.db. HealthCheck(ctx); err != nil {
+	if err := h.db.HealthCheck(ctx); err != nil {
 		checks["database"] = "unhealthy:  " + err.Error()
 		status = "unhealthy"
 	} else {
@@ -45,7 +45,7 @@ func (h *HealthHandler) Health(c *gin.Context) {
 
 	c.JSON(statusCode, HealthResponse{
 		Status:    status,
-		Timestamp: time. Now().UTC().Format(time.RFC3339),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Checks:    checks,
 	})
 }
@@ -71,6 +71,6 @@ func (h *HealthHandler) Ready(c *gin.Context) {
 func (h *HealthHandler) Live(c *gin.Context) {
 	c.JSON(http.StatusOK, HealthResponse{
 		Status:    "alive",
-		Timestamp: time. Now().UTC().Format(time.RFC3339),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 }

@@ -18,7 +18,7 @@ type Config struct {
 type Simulator struct {
 	config     Config
 	clusters   map[string]*ClusterSim
-	mu         sync. RWMutex
+	mu         sync.RWMutex
 	httpServer *http.Server
 }
 

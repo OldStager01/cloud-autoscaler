@@ -165,7 +165,7 @@ func (a *Analyzer) calculateTrend(clusterID string) models.Trend {
 	secondAvg := a.averageCPU(secondHalf)
 
 	diff := secondAvg - firstAvg
-	threshold := 3.0
+	threshold := 3.0 // TODO: Make configurable
 
 	switch {
 	case diff > threshold: 

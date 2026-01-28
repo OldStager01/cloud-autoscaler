@@ -65,7 +65,7 @@ type ClusterStateData struct {
 	Status          string `json:"status"`
 }
 
-func BroadcastMetrics(hub *Hub, clusterID string, analyzed *models. AnalyzedMetrics) {
+func BroadcastMetrics(hub *Hub, clusterID string, analyzed *models.AnalyzedMetrics) {
 	data := MetricsData{
 		AvgCPU:      analyzed.AvgCPU,
 		AvgMemory:   analyzed.AvgMemory,
@@ -96,11 +96,11 @@ func BroadcastAlert(hub *Hub, clusterID string, severity, message string) {
 	hub.BroadcastToCluster(clusterID, msg.JSON())
 }
 
-func BroadcastClusterState(hub *Hub, clusterID string, state *models. ClusterState) {
+func BroadcastClusterState(hub *Hub, clusterID string, state *models.ClusterState) {
 	data := ClusterStateData{
 		TotalServers:  state.TotalServers,
 		ActiveServers: state.ActiveServers,
-		Provisioning:  state. ProvisioningCnt,
+		Provisioning:  state.ProvisioningCnt,
 		Draining:      state.DrainingCount,
 	}
 	msg := NewMessage(MessageTypeClusterState, clusterID, data)

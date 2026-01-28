@@ -32,13 +32,13 @@ func (h *Hub) Run() {
 			h.mu.Unlock()
 			logger.Infof("WebSocket client connected (total: %d)", h.ClientCount())
 
-		case client := <-h. unregister:
-			h. mu.Lock()
+		case client := <-h.unregister:
+			h.mu.Lock()
 			if _, ok := h.clients[client]; ok {
-				delete(h. clients, client)
+				delete(h.clients, client)
 				close(client.send)
 			}
-			h.mu. Unlock()
+			h.mu.Unlock()
 			logger.Infof("WebSocket client disconnected (total: %d)", h.ClientCount())
 
 		case message := <-h.broadcast:
@@ -73,7 +73,8 @@ func (h *Hub) BroadcastToCluster(clusterID string, message []byte) {
 	defer h.mu.RUnlock()
 
 	for client := range h.clients {
-		if client.clusterID == "" || client.clusterID == clusterID {
+		// Only send to clients that have explicitly subscribed to this cluster
+		if client.clusterID == clusterID {
 			select {
 			case client.send <- message:
 			default:
