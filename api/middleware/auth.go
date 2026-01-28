@@ -11,28 +11,43 @@ import (
 const (
 	AuthorizationHeader = "Authorization"
 	BearerPrefix        = "Bearer "
+	AuthCookieName      = "auth_token"
 	UserIDKey           = "user_id"
 	UsernameKey         = "username"
 )
 
 func JWTAuth(authService *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		var token string
+
+		// First, try to get token from Authorization header
 		header := c.GetHeader(AuthorizationHeader)
-		if header == "" {
+		if header != "" {
+			if !strings.HasPrefix(header, BearerPrefix) {
+				// c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				// 	"error": "invalid authorization header format",
+				// })
+				// return
+			}else{
+				token = strings.TrimPrefix(header, BearerPrefix)
+			}
+		}
+
+		// If no Authorization header, try to get token from cookie
+		if token == ""  {
+			cookieToken, err := c.Cookie(AuthCookieName)
+			if err == nil && cookieToken != "" {
+				token = cookieToken
+			}
+		}
+
+		// If no token found in either location
+		if token == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "missing authorization header",
+				"error": "missing authorization header or cookie",
 			})
 			return
 		}
-
-		if !strings.HasPrefix(header, BearerPrefix) {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error":  "invalid authorization header format",
-			})
-			return
-		}
-
-		token := strings.TrimPrefix(header, BearerPrefix)
 		claims, err := authService.ValidateToken(token)
 		if err != nil {
 			status := http.StatusUnauthorized

@@ -64,9 +64,23 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	// Set secure HTTP-only cookie with the token
+	// Cookie expires in 24 hours (same as token)
+	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetCookie(
+		"auth_token",   // name
+		token,          // value
+		86400,          // maxAge (24 hours in seconds)
+		"/",            // path
+		"",             // domain (empty = current domain)
+		true,           // secure (HTTPS only)
+		true,           // httpOnly (not accessible via JavaScript)
+	)
+
+	// Keep JSON response for backward compatibility
 	c.JSON(http.StatusOK, LoginResponse{
 		Token:     token,
-		ExpiresIn:  86400, // 24 hours
+		ExpiresIn: 86400, // 24 hours
 		Username:  user.Username,
 	})
 }
