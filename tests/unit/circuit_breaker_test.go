@@ -5,40 +5,124 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/OldStager01/cloud-autoscaler/internal/resilience"
 )
 
-func TestCircuitBreaker_Execute_Success(t *testing.T) {
-	cb := resilience.NewCircuitBreaker(resilience.CircuitBreakerConfig{
-		MaxFailures: 3,
-		Timeout:     5 * time.Second,
-	})
-
-	err := cb.Execute(func() error {
-		return nil
-	})
-
-	if err != nil {
-		t.Errorf("expected no error, got %v", err)
+func TestCircuitBreaker_Execute(t *testing.T) {
+	tests := []struct {
+		name          string
+		config        resilience.CircuitBreakerConfig
+		execFunc      func() error
+		expectedErr   error
+		expectedState resilience.State
+	}{
+		{
+			name: "successful execution stays closed",
+			config: resilience.CircuitBreakerConfig{
+				MaxFailures: 3,
+				Timeout:     5 * time.Second,
+			},
+			execFunc:      func() error { return nil },
+			expectedErr:   nil,
+			expectedState: resilience.StateClosed,
+		},
 	}
-	if cb.State() != resilience.StateClosed {
-		t.Errorf("expected StateClosed, got %v", cb.State())
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cb := resilience.NewCircuitBreaker(tt.config)
+
+			err := cb.Execute(tt.execFunc)
+
+			if tt.expectedErr != nil {
+				assert.ErrorIs(t, err, tt.expectedErr)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.expectedState, cb.State())
+		})
 	}
 }
 
-func TestCircuitBreaker_TransitionToOpen(t *testing.T) {
-	cb := resilience.NewCircuitBreaker(resilience.CircuitBreakerConfig{
-		MaxFailures: 3,
-		Timeout:     5 * time.Second,
-	})
-
-	testErr := errors.New("test error")
-	for i := 0; i < 3; i++ {
-		cb.Execute(func() error { return testErr })
+func TestCircuitBreaker_StateTransitions(t *testing.T) {
+	tests := []struct {
+		name          string
+		config        resilience.CircuitBreakerConfig
+		setup         func(cb *resilience.CircuitBreaker)
+		expectedState resilience.State
+	}{
+		{
+			name: "transition to open after max failures",
+			config: resilience.CircuitBreakerConfig{
+				MaxFailures: 3,
+				Timeout:     5 * time.Second,
+			},
+			setup: func(cb *resilience.CircuitBreaker) {
+				for i := 0; i < 3; i++ {
+					cb.Execute(func() error { return errors.New("fail") })
+				}
+			},
+			expectedState: resilience.StateOpen,
+		},
+		{
+			name: "transition to half-open after timeout",
+			config: resilience.CircuitBreakerConfig{
+				MaxFailures: 3,
+				Timeout:     50 * time.Millisecond,
+			},
+			setup: func(cb *resilience.CircuitBreaker) {
+				for i := 0; i < 3; i++ {
+					cb.Execute(func() error { return errors.New("fail") })
+				}
+				time.Sleep(100 * time.Millisecond)
+				cb.Execute(func() error { return nil })
+			},
+			expectedState: resilience.StateHalfOpen,
+		},
+		{
+			name: "transition from half-open to closed on success",
+			config: resilience.CircuitBreakerConfig{
+				MaxFailures: 3,
+				Timeout:     50 * time.Millisecond,
+				HalfOpenMax: 2,
+			},
+			setup: func(cb *resilience.CircuitBreaker) {
+				for i := 0; i < 3; i++ {
+					cb.Execute(func() error { return errors.New("fail") })
+				}
+				time.Sleep(100 * time.Millisecond)
+				for i := 0; i < 3; i++ {
+					cb.Execute(func() error { return nil })
+				}
+			},
+			expectedState: resilience.StateClosed,
+		},
+		{
+			name: "reset returns to closed",
+			config: resilience.CircuitBreakerConfig{
+				MaxFailures: 3,
+				Timeout:     1 * time.Hour,
+			},
+			setup: func(cb *resilience.CircuitBreaker) {
+				for i := 0; i < 3; i++ {
+					cb.Execute(func() error { return errors.New("fail") })
+				}
+				cb.Reset()
+			},
+			expectedState: resilience.StateClosed,
+		},
 	}
 
-	if cb.State() != resilience.StateOpen {
-		t.Errorf("expected StateOpen, got %v", cb.State())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cb := resilience.NewCircuitBreaker(tt.config)
+
+			tt.setup(cb)
+
+			assert.Equal(t, tt.expectedState, cb.State())
+		})
 	}
 }
 
@@ -54,65 +138,5 @@ func TestCircuitBreaker_OpenState_RejectsRequest(t *testing.T) {
 
 	err := cb.Execute(func() error { return nil })
 
-	if err != resilience.ErrCircuitOpen {
-		t.Errorf("expected ErrCircuitOpen, got %v", err)
-	}
-}
-
-func TestCircuitBreaker_TransitionToHalfOpen(t *testing.T) {
-	cb := resilience.NewCircuitBreaker(resilience.CircuitBreakerConfig{
-		MaxFailures: 3,
-		Timeout:     50 * time.Millisecond,
-	})
-
-	for i := 0; i < 3; i++ {
-		cb.Execute(func() error { return errors.New("fail") })
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	cb.Execute(func() error { return nil })
-
-	if cb.State() != resilience.StateHalfOpen {
-		t.Errorf("expected StateHalfOpen, got %v", cb.State())
-	}
-}
-
-func TestCircuitBreaker_HalfOpen_Success(t *testing.T) {
-	cb := resilience.NewCircuitBreaker(resilience.CircuitBreakerConfig{
-		MaxFailures: 3,
-		Timeout:     50 * time.Millisecond,
-		HalfOpenMax: 2,
-	})
-
-	for i := 0; i < 3; i++ {
-		cb.Execute(func() error { return errors.New("fail") })
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	for i := 0; i < 3; i++ {
-		cb.Execute(func() error { return nil })
-	}
-
-	if cb.State() != resilience.StateClosed {
-		t.Errorf("expected StateClosed, got %v", cb.State())
-	}
-}
-
-func TestCircuitBreaker_Reset(t *testing.T) {
-	cb := resilience.NewCircuitBreaker(resilience.CircuitBreakerConfig{
-		MaxFailures: 3,
-		Timeout:     1 * time.Hour,
-	})
-
-	for i := 0; i < 3; i++ {
-		cb.Execute(func() error { return errors.New("fail") })
-	}
-
-	cb.Reset()
-
-	if cb.State() != resilience.StateClosed {
-		t.Errorf("expected StateClosed after reset, got %v", cb.State())
-	}
+	assert.ErrorIs(t, err, resilience.ErrCircuitOpen)
 }

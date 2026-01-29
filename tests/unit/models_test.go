@@ -4,57 +4,112 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/OldStager01/cloud-autoscaler/pkg/models"
 )
 
 func TestClusterMetrics_CalculateAggregates(t *testing.T) {
-	metrics := &models.ClusterMetrics{
-		ClusterID: "test-cluster",
-		Timestamp: time.Now(),
-		Servers: []models.ServerMetric{
-			{ServerID: "s1", CPUUsage: 40.0, MemoryUsage: 50.0, RequestLoad: 100},
-			{ServerID: "s2", CPUUsage: 60.0, MemoryUsage: 70.0, RequestLoad: 200},
+	tests := []struct {
+		name        string
+		servers     []models.ServerMetric
+		expectedAvg float64
+		expectedMax float64
+		expectedMin float64
+		expectedCnt int
+	}{
+		{
+			name: "two servers",
+			servers: []models.ServerMetric{
+				{ServerID: "s1", CPUUsage: 40.0, MemoryUsage: 50.0, RequestLoad: 100},
+				{ServerID: "s2", CPUUsage: 60.0, MemoryUsage: 70.0, RequestLoad: 200},
+			},
+			expectedAvg: 50.0,
+			expectedMax: 60.0,
+			expectedMin: 40.0,
+			expectedCnt: 2,
 		},
 	}
 
-	agg := metrics.CalculateAggregates()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			metrics := &models.ClusterMetrics{
+				ClusterID: "test-cluster",
+				Timestamp: time.Now(),
+				Servers:   tt.servers,
+			}
 
-	if agg.AvgCPU != 50.0 {
-		t.Errorf("expected AvgCPU 50.0, got %f", agg.AvgCPU)
-	}
-	if agg.AvgMemory != 60.0 {
-		t.Errorf("expected AvgMemory 60.0, got %f", agg.AvgMemory)
-	}
-	if agg.MaxCPU != 60.0 {
-		t.Errorf("expected MaxCPU 60.0, got %f", agg.MaxCPU)
-	}
-	if agg.MinCPU != 40.0 {
-		t.Errorf("expected MinCPU 40.0, got %f", agg.MinCPU)
-	}
-	if agg.ServerCount != 2 {
-		t.Errorf("expected ServerCount 2, got %d", agg.ServerCount)
+			agg := metrics.CalculateAggregates()
+
+			assert.Equal(t, tt.expectedAvg, agg.AvgCPU)
+			assert.Equal(t, tt.expectedMax, agg.MaxCPU)
+			assert.Equal(t, tt.expectedMin, agg.MinCPU)
+			assert.Equal(t, tt.expectedCnt, agg.ServerCount)
+		})
 	}
 }
 
 func TestClusterState_CanScaleUp(t *testing.T) {
-	state := &models.ClusterState{TotalServers: 5}
-
-	if !state.CanScaleUp(10) {
-		t.Error("expected CanScaleUp to be true when below max")
+	tests := []struct {
+		name         string
+		totalServers int
+		maxServers   int
+		expected     bool
+	}{
+		{
+			name:         "can scale up when below max",
+			totalServers: 5,
+			maxServers:   10,
+			expected:     true,
+		},
+		{
+			name:         "cannot scale up when at max",
+			totalServers: 5,
+			maxServers:   5,
+			expected:     false,
+		},
 	}
-	if state.CanScaleUp(5) {
-		t.Error("expected CanScaleUp to be false when at max")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := &models.ClusterState{TotalServers: tt.totalServers}
+
+			result := state.CanScaleUp(tt.maxServers)
+
+			assert.Equal(t, tt.expected, result)
+		})
 	}
 }
 
 func TestClusterState_CanScaleDown(t *testing.T) {
-	state := &models.ClusterState{ActiveServers: 5}
-
-	if !state.CanScaleDown(2) {
-		t.Error("expected CanScaleDown to be true when above min")
+	tests := []struct {
+		name          string
+		activeServers int
+		minServers    int
+		expected      bool
+	}{
+		{
+			name:          "can scale down when above min",
+			activeServers: 5,
+			minServers:    2,
+			expected:      true,
+		},
+		{
+			name:          "cannot scale down when at min",
+			activeServers: 5,
+			minServers:    5,
+			expected:      false,
+		},
 	}
-	if state.CanScaleDown(5) {
-		t.Error("expected CanScaleDown to be false when at min")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := &models.ClusterState{ActiveServers: tt.activeServers}
+
+			result := state.CanScaleDown(tt.minServers)
+
+			assert.Equal(t, tt.expected, result)
+		})
 	}
 }
 
@@ -83,9 +138,9 @@ func TestScalingDecision_ShouldExecute(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.decision.ShouldExecute(); got != tt.want {
-				t.Errorf("ShouldExecute() = %v, want %v", got, tt.want)
-			}
+			result := tt.decision.ShouldExecute()
+
+			assert.Equal(t, tt.want, result)
 		})
 	}
 }
@@ -115,9 +170,9 @@ func TestAnalyzedMetrics_IsCritical(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.analyzed.IsCritical(); got != tt.want {
-				t.Errorf("IsCritical() = %v, want %v", got, tt.want)
-			}
+			result := tt.analyzed.IsCritical()
+
+			assert.Equal(t, tt.want, result)
 		})
 	}
 }
@@ -128,7 +183,5 @@ func TestAnalyzedMetrics_IsWarning(t *testing.T) {
 		MemoryStatus: models.ThresholdNormal,
 	}
 
-	if !analyzed.IsWarning() {
-		t.Error("expected IsWarning to be true")
-	}
+	assert.True(t, analyzed.IsWarning(), "expected IsWarning to be true")
 }

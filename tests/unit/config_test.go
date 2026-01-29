@@ -1,9 +1,11 @@
 package unit
 
 import (
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/OldStager01/cloud-autoscaler/pkg/config"
 )
@@ -45,58 +47,61 @@ func validConfig() *config.Config {
 	}
 }
 
-func TestConfig_Validate_Valid(t *testing.T) {
-	cfg := validConfig()
-
-	err := cfg.Validate()
-
-	if err != nil {
-		t.Errorf("expected valid config, got error: %v", err)
+func TestConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name        string
+		modifyFunc  func(*config.Config)
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name:       "valid config",
+			modifyFunc: func(c *config.Config) {},
+			expectErr:  false,
+		},
+		{
+			name: "invalid thresholds - CPUHigh less than CPULow",
+			modifyFunc: func(c *config.Config) {
+				c.Analyzer.Thresholds.CPUHigh = 20.0
+				c.Analyzer.Thresholds.CPULow = 50.0
+			},
+			expectErr:   true,
+			errContains: "cpu_high must be greater than cpu_low",
+		},
+		{
+			name: "invalid min/max servers",
+			modifyFunc: func(c *config.Config) {
+				c.Decision.MinServers = 10
+				c.Decision.MaxServers = 5
+			},
+			expectErr:   true,
+			errContains: "max_servers must be >= min_servers",
+		},
+		{
+			name: "invalid collector timeout",
+			modifyFunc: func(c *config.Config) {
+				c.Collector.Timeout = 15 * time.Second
+				c.Collector.Interval = 10 * time.Second
+			},
+			expectErr:   true,
+			errContains: "timeout must be less than",
+		},
 	}
-}
 
-func TestConfig_Validate_InvalidThresholds(t *testing.T) {
-	cfg := validConfig()
-	cfg.Analyzer.Thresholds.CPUHigh = 20.0
-	cfg.Analyzer.Thresholds.CPULow = 50.0
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			tt.modifyFunc(cfg)
 
-	err := cfg.Validate()
+			err := cfg.Validate()
 
-	if err == nil {
-		t.Error("expected error for invalid thresholds")
-	}
-	if !strings.Contains(err.Error(), "cpu_high must be greater than cpu_low") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
-func TestConfig_Validate_InvalidMinMaxServers(t *testing.T) {
-	cfg := validConfig()
-	cfg.Decision.MinServers = 10
-	cfg.Decision.MaxServers = 5
-
-	err := cfg.Validate()
-
-	if err == nil {
-		t.Error("expected error for invalid min/max servers")
-	}
-	if !strings.Contains(err.Error(), "max_servers must be >= min_servers") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
-func TestConfig_Validate_InvalidCollectorTimeout(t *testing.T) {
-	cfg := validConfig()
-	cfg.Collector.Timeout = 15 * time.Second
-	cfg.Collector.Interval = 10 * time.Second
-
-	err := cfg.Validate()
-
-	if err == nil {
-		t.Error("expected error for invalid collector timeout")
-	}
-	if !strings.Contains(err.Error(), "timeout must be less than") {
-		t.Errorf("unexpected error message: %v", err)
+			if tt.expectErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
 	}
 }
 
@@ -113,7 +118,5 @@ func TestDatabaseConfig_DSN(t *testing.T) {
 	dsn := dbCfg.DSN()
 
 	expected := "host=localhost port=5432 user=admin password=secret dbname=testdb sslmode=disable"
-	if dsn != expected {
-		t.Errorf("expected DSN %q, got %q", expected, dsn)
-	}
+	assert.Equal(t, expected, dsn)
 }

@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/OldStager01/cloud-autoscaler/internal/decision"
 	"github.com/OldStager01/cloud-autoscaler/pkg/models"
 )
@@ -24,92 +26,136 @@ func newTestEngine() *decision.Engine {
 	})
 }
 
-func TestEngine_Decide_EmergencyScaleUp(t *testing.T) {
-	engine := newTestEngine()
-	analyzed := &models.AnalyzedMetrics{
-		ClusterID: "test-cluster",
-		AvgCPU:    96.0,
-		CPUStatus: models.ThresholdCritical,
+func TestEngine_Decide(t *testing.T) {
+	sustainedPast := time.Now().Add(-60 * time.Second)
+
+	tests := []struct {
+		name             string
+		analyzed         *models.AnalyzedMetrics
+		state            *models.ClusterState
+		expectedAction   models.ScalingAction
+		expectedEmerg    bool
+		checkCooldown    bool
+		expectedCooldown bool
+	}{
+		{
+			name: "emergency scale up on very high CPU",
+			analyzed: &models.AnalyzedMetrics{
+				ClusterID: "test-cluster",
+				AvgCPU:    96.0,
+				CPUStatus: models.ThresholdCritical,
+			},
+			state:          &models.ClusterState{ActiveServers: 5, TotalServers: 5},
+			expectedAction: models.ActionScaleUp,
+			expectedEmerg:  true,
+		},
+		{
+			name: "scale up on critical CPU",
+			analyzed: &models.AnalyzedMetrics{
+				ClusterID: "test-cluster",
+				AvgCPU:    92.0,
+				CPUStatus: models.ThresholdCritical,
+			},
+			state:          &models.ClusterState{ActiveServers: 5, TotalServers: 5},
+			expectedAction: models.ActionScaleUp,
+			expectedEmerg:  false,
+		},
+		{
+			name: "scale up on sustained high CPU",
+			analyzed: &models.AnalyzedMetrics{
+				ClusterID:       "test-cluster",
+				AvgCPU:          85.0,
+				CPUStatus:       models.ThresholdWarning,
+				SustainedHighAt: &sustainedPast,
+			},
+			state:          &models.ClusterState{ActiveServers: 5, TotalServers: 5},
+			expectedAction: models.ActionScaleUp,
+		},
+		{
+			name: "scale down on sustained low CPU",
+			analyzed: &models.AnalyzedMetrics{
+				ClusterID:      "test-cluster",
+				AvgCPU:         20.0,
+				CPUStatus:      models.ThresholdNormal,
+				Trend:          models.TrendStable,
+				SustainedLowAt: &sustainedPast,
+			},
+			state:          &models.ClusterState{ActiveServers: 5, TotalServers: 5},
+			expectedAction: models.ActionScaleDown,
+		},
+		{
+			name: "maintain on normal params",
+			analyzed: &models.AnalyzedMetrics{
+				ClusterID: "test-cluster",
+				AvgCPU:    50.0,
+				CPUStatus: models.ThresholdNormal,
+				Trend:     models.TrendStable,
+			},
+			state:          &models.ClusterState{ActiveServers: 5, TotalServers: 5},
+			expectedAction: models.ActionMaintain,
+		},
+		{
+			name: "maintain at max servers even with spike",
+			analyzed: &models.AnalyzedMetrics{
+				ClusterID: "test-cluster",
+				AvgCPU:    85.0,
+				CPUStatus: models.ThresholdWarning,
+				HasSpike:  true,
+			},
+			state:          &models.ClusterState{ActiveServers: 10, TotalServers: 10},
+			expectedAction: models.ActionMaintain,
+		},
+		{
+			name: "maintain at min servers even with low CPU",
+			analyzed: &models.AnalyzedMetrics{
+				ClusterID:      "test-cluster",
+				AvgCPU:         20.0,
+				CPUStatus:      models.ThresholdNormal,
+				Trend:          models.TrendStable,
+				SustainedLowAt: &sustainedPast,
+			},
+			state:          &models.ClusterState{ActiveServers: 2, TotalServers: 2},
+			expectedAction: models.ActionMaintain,
+		},
+		{
+			name: "scale up on spike detected",
+			analyzed: &models.AnalyzedMetrics{
+				ClusterID: "test-cluster",
+				AvgCPU:    75.0,
+				CPUStatus: models.ThresholdNormal,
+				HasSpike:  true,
+			},
+			state:          &models.ClusterState{ActiveServers: 5, TotalServers: 5},
+			expectedAction: models.ActionScaleUp,
+		},
+		{
+			name: "maintain due to rising trend blocking scale down",
+			analyzed: &models.AnalyzedMetrics{
+				ClusterID:      "test-cluster",
+				AvgCPU:         25.0,
+				CPUStatus:      models.ThresholdNormal,
+				Trend:          models.TrendRising,
+				SustainedLowAt: &sustainedPast,
+			},
+			state:          &models.ClusterState{ActiveServers: 5, TotalServers: 5},
+			expectedAction: models.ActionMaintain,
+		},
 	}
-	state := &models.ClusterState{ActiveServers: 5, TotalServers: 5}
 
-	result := engine.Decide(analyzed, nil, state)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := newTestEngine()
 
-	if result.Action != models.ActionScaleUp {
-		t.Errorf("expected ScaleUp, got %s", result.Action)
-	}
-	if result.IsEmergency != true {
-		t.Error("expected IsEmergency to be true")
-	}
-}
+			result := engine.Decide(tt.analyzed, nil, tt.state)
 
-func TestEngine_Decide_ScaleUp_CriticalCPU(t *testing.T) {
-	engine := newTestEngine()
-	analyzed := &models.AnalyzedMetrics{
-		ClusterID: "test-cluster",
-		AvgCPU:    92.0,
-		CPUStatus: models.ThresholdCritical,
-	}
-	state := &models.ClusterState{ActiveServers: 5, TotalServers: 5}
-
-	result := engine.Decide(analyzed, nil, state)
-
-	if result.Action != models.ActionScaleUp {
-		t.Errorf("expected ScaleUp, got %s", result.Action)
-	}
-}
-
-func TestEngine_Decide_ScaleUp_SustainedHighCPU(t *testing.T) {
-	engine := newTestEngine()
-	sustainedTime := time.Now().Add(-60 * time.Second)
-	analyzed := &models.AnalyzedMetrics{
-		ClusterID:       "test-cluster",
-		AvgCPU:          85.0,
-		CPUStatus:       models.ThresholdWarning,
-		SustainedHighAt: &sustainedTime,
-	}
-	state := &models.ClusterState{ActiveServers: 5, TotalServers: 5}
-
-	result := engine.Decide(analyzed, nil, state)
-
-	if result.Action != models.ActionScaleUp {
-		t.Errorf("expected ScaleUp, got %s", result.Action)
-	}
-}
-
-func TestEngine_Decide_ScaleDown_SustainedLowCPU(t *testing.T) {
-	engine := newTestEngine()
-	sustainedTime := time.Now().Add(-60 * time.Second)
-	analyzed := &models.AnalyzedMetrics{
-		ClusterID:      "test-cluster",
-		AvgCPU:         20.0,
-		CPUStatus:      models.ThresholdNormal,
-		Trend:          models.TrendStable,
-		SustainedLowAt: &sustainedTime,
-	}
-	state := &models.ClusterState{ActiveServers: 5, TotalServers: 5}
-
-	result := engine.Decide(analyzed, nil, state)
-
-	if result.Action != models.ActionScaleDown {
-		t.Errorf("expected ScaleDown, got %s", result.Action)
-	}
-}
-
-func TestEngine_Decide_Maintain_NormalParams(t *testing.T) {
-	engine := newTestEngine()
-	analyzed := &models.AnalyzedMetrics{
-		ClusterID: "test-cluster",
-		AvgCPU:    50.0,
-		CPUStatus: models.ThresholdNormal,
-		Trend:     models.TrendStable,
-	}
-	state := &models.ClusterState{ActiveServers: 5, TotalServers: 5}
-
-	result := engine.Decide(analyzed, nil, state)
-
-	if result.Action != models.ActionMaintain {
-		t.Errorf("expected Maintain, got %s", result.Action)
+			assert.Equal(t, tt.expectedAction, result.Action)
+			if tt.expectedEmerg {
+				assert.True(t, result.IsEmergency, "expected IsEmergency to be true")
+			}
+			if tt.checkCooldown {
+				assert.Equal(t, tt.expectedCooldown, result.CooldownActive)
+			}
+		})
 	}
 }
 
@@ -127,79 +173,5 @@ func TestEngine_Decide_CooldownActive(t *testing.T) {
 
 	result := engine.Decide(analyzed, nil, state)
 
-	if result.CooldownActive != true {
-		t.Error("expected CooldownActive to be true")
-	}
-}
-
-func TestEngine_Decide_MaxServersReached(t *testing.T) {
-	engine := newTestEngine()
-	analyzed := &models.AnalyzedMetrics{
-		ClusterID: "test-cluster",
-		AvgCPU:    85.0,
-		CPUStatus: models.ThresholdWarning,
-		HasSpike:  true,
-	}
-	state := &models.ClusterState{ActiveServers: 10, TotalServers: 10}
-
-	result := engine.Decide(analyzed, nil, state)
-
-	if result.Action != models.ActionMaintain {
-		t.Errorf("expected Maintain at max servers, got %s", result.Action)
-	}
-}
-
-func TestEngine_Decide_MinServersReached(t *testing.T) {
-	engine := newTestEngine()
-	sustainedTime := time.Now().Add(-60 * time.Second)
-	analyzed := &models.AnalyzedMetrics{
-		ClusterID:      "test-cluster",
-		AvgCPU:         20.0,
-		CPUStatus:      models.ThresholdNormal,
-		Trend:          models.TrendStable,
-		SustainedLowAt: &sustainedTime,
-	}
-	state := &models.ClusterState{ActiveServers: 2, TotalServers: 2}
-
-	result := engine.Decide(analyzed, nil, state)
-
-	if result.Action != models.ActionMaintain {
-		t.Errorf("expected Maintain at min servers, got %s", result.Action)
-	}
-}
-
-func TestEngine_Decide_ScaleUp_SpikeDetected(t *testing.T) {
-	engine := newTestEngine()
-	analyzed := &models.AnalyzedMetrics{
-		ClusterID: "test-cluster",
-		AvgCPU:    75.0,
-		CPUStatus: models.ThresholdNormal,
-		HasSpike:  true,
-	}
-	state := &models.ClusterState{ActiveServers: 5, TotalServers: 5}
-
-	result := engine.Decide(analyzed, nil, state)
-
-	if result.Action != models.ActionScaleUp {
-		t.Errorf("expected ScaleUp on spike, got %s", result.Action)
-	}
-}
-
-func TestEngine_Decide_ScaleDown_BlockedByRisingTrend(t *testing.T) {
-	engine := newTestEngine()
-	sustainedTime := time.Now().Add(-60 * time.Second)
-	analyzed := &models.AnalyzedMetrics{
-		ClusterID:      "test-cluster",
-		AvgCPU:         25.0,
-		CPUStatus:      models.ThresholdNormal,
-		Trend:          models.TrendRising,
-		SustainedLowAt: &sustainedTime,
-	}
-	state := &models.ClusterState{ActiveServers: 5, TotalServers: 5}
-
-	result := engine.Decide(analyzed, nil, state)
-
-	if result.Action != models.ActionMaintain {
-		t.Errorf("expected Maintain due to rising trend, got %s", result.Action)
-	}
+	assert.True(t, result.CooldownActive, "expected CooldownActive to be true")
 }
