@@ -16,22 +16,28 @@ type Config struct {
 	API        APIConfig        `mapstructure:"api"`
 	WebSocket  WebSocketConfig  `mapstructure:"websocket"`
 	Prometheus PrometheusConfig `mapstructure:"prometheus"`
+	Events     EventsConfig     `mapstructure:"events"`
 }
 
 type AppConfig struct {
-	Name     string `mapstructure:"name"`
-	Mode     string `mapstructure:"mode"`
-	LogLevel string `mapstructure:"log_level"`
+	Name            string        `mapstructure:"name"`
+	Mode            string        `mapstructure:"mode"`
+	LogLevel        string        `mapstructure:"log_level"`
+	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
 }
 
 type DatabaseConfig struct {
-	Host           string `mapstructure:"host"`
-	Port           int    `mapstructure:"port"`
-	Name           string `mapstructure:"name"`
-	User           string `mapstructure:"user"`
-	Password       string `mapstructure:"password"`
-	MaxConnections int    `mapstructure:"max_connections"`
-	SSLMode        string `mapstructure:"ssl_mode"`
+	Host              string        `mapstructure:"host"`
+	Port              int           `mapstructure:"port"`
+	Name              string        `mapstructure:"name"`
+	User              string        `mapstructure:"user"`
+	Password          string        `mapstructure:"password"`
+	MaxConnections    int           `mapstructure:"max_connections"`
+	SSLMode           string        `mapstructure:"ssl_mode"`
+	ConnMaxLifetime   time.Duration `mapstructure:"conn_max_lifetime"`
+	ConnMaxIdleTime   time.Duration `mapstructure:"conn_max_idle_time"`
+	PingTimeout       time.Duration `mapstructure:"ping_timeout"`
+	MigrationTimeout  time.Duration `mapstructure:"migration_timeout"`
 }
 
 func (d DatabaseConfig) DSN() string {
@@ -60,9 +66,11 @@ type CircuitBreakerConfig struct {
 }
 
 type AnalyzerConfig struct {
-	Thresholds     ThresholdConfig `mapstructure:"thresholds"`
-	TrendWindow    time.Duration   `mapstructure:"trend_window"`
-	SpikeThreshold float64         `mapstructure:"spike_threshold"`
+	Thresholds        ThresholdConfig `mapstructure:"thresholds"`
+	TrendWindow       time.Duration   `mapstructure:"trend_window"`
+	SpikeThreshold    float64         `mapstructure:"spike_threshold"`
+	MaxHistoryLength  int             `mapstructure:"max_history_length"`
+	CriticalThreshold float64         `mapstructure:"critical_threshold"`
 }
 
 type ThresholdConfig struct {
@@ -96,19 +104,49 @@ type ScalerConfig struct {
 }
 
 type APIConfig struct {
-	Port         int           `mapstructure:"port"`
-	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
-	WriteTimeout time.Duration `mapstructure:"write_timeout"`
-	RateLimit    int           `mapstructure:"rate_limit"`
-	JWTSecret    string        `mapstructure:"jwt_secret"`
+	Port            int           `mapstructure:"port"`
+	ReadTimeout     time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
+	IdleTimeout     time.Duration `mapstructure:"idle_timeout"`
+	RateLimit       int           `mapstructure:"rate_limit"`
+	JWTSecret       string        `mapstructure:"jwt_secret"`
+	JWTDuration     time.Duration `mapstructure:"jwt_duration"`
+	JWTIssuer       string        `mapstructure:"jwt_issuer"`
+	CookieName      string        `mapstructure:"cookie_name"`
+	CookieMaxAge    int           `mapstructure:"cookie_max_age"`
+	CookiePath      string        `mapstructure:"cookie_path"`
+	CookieSecure    bool          `mapstructure:"cookie_secure"`
+	CookieHTTPOnly  bool          `mapstructure:"cookie_http_only"`
+	DefaultLimit    int           `mapstructure:"default_limit"`
+	MaxLimit        int           `mapstructure:"max_limit"`
+	CORS            CORSConfig    `mapstructure:"cors"`
 }
 
 type WebSocketConfig struct {
-	MaxConnections int           `mapstructure:"max_connections"`
-	PingInterval   time.Duration `mapstructure:"ping_interval"`
+	MaxConnections   int           `mapstructure:"max_connections"`
+	PingInterval     time.Duration `mapstructure:"ping_interval"`
+	WriteTimeout     time.Duration `mapstructure:"write_timeout"`
+	PongTimeout      time.Duration `mapstructure:"pong_timeout"`
+	MaxMessageSize   int64         `mapstructure:"max_message_size"`
+	ReadBufferSize   int           `mapstructure:"read_buffer_size"`
+	WriteBufferSize  int           `mapstructure:"write_buffer_size"`
+	BroadcastBuffer  int           `mapstructure:"broadcast_buffer"`
+	ClientBuffer     int           `mapstructure:"client_buffer"`
 }
 
 type PrometheusConfig struct {
 	Enabled bool `mapstructure:"enabled"`
 	Port    int  `mapstructure:"port"`
+}
+
+type CORSConfig struct {
+	AllowedOrigins   []string `mapstructure:"allowed_origins"`
+	AllowedMethods   []string `mapstructure:"allowed_methods"`
+	AllowedHeaders   []string `mapstructure:"allowed_headers"`
+	ExposedHeaders   []string `mapstructure:"exposed_headers"`
+	AllowCredentials bool     `mapstructure:"allow_credentials"`
+}
+
+type EventsConfig struct {
+	BufferSize int `mapstructure:"buffer_size"`
 }

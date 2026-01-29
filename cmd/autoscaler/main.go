@@ -55,7 +55,11 @@ func run() error {
 	logger.Info("Database connection established")
 
 	if *migrate {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		migrationTimeout := cfg.Database.MigrationTimeout
+		if migrationTimeout == 0 {
+			migrationTimeout = 60 * time.Second
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), migrationTimeout)
 		defer cancel()
 		logger.Info("Running database migrations")
 		migrator := database.NewMigrator(db)
@@ -87,7 +91,7 @@ func runServer(cfg *config.Config, db *database.DB) error {
 	}
 
 	// Create API server with orchestrator for dynamic cluster management
-	server := api.NewServer(cfg.API, db, orch)
+	server := api.NewServer(cfg.API, cfg.WebSocket, db, orch)
 
 	// Setup graceful shutdown
 	shutdownChan := make(chan os.Signal, 1)
@@ -110,7 +114,11 @@ func runServer(cfg *config.Config, db *database.DB) error {
 	}
 
 	// Graceful shutdown with timeout
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownTimeout := cfg.App.ShutdownTimeout
+	if shutdownTimeout == 0 {
+		shutdownTimeout = 30 * time.Second
+	}
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
 	// Shutdown orchestrator first (stops all pipelines)

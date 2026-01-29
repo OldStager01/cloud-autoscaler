@@ -4,7 +4,10 @@ import (
 	"sync"
 
 	"github.com/OldStager01/cloud-autoscaler/internal/logger"
+	"github.com/OldStager01/cloud-autoscaler/pkg/config"
 )
+
+const defaultBroadcastBuffer = 256
 
 type Hub struct {
 	clients    map[*Client]bool
@@ -12,14 +15,23 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	mu         sync.RWMutex
+	settings   *WebSocketSettings
 }
 
-func NewHub() *Hub {
+func NewHub(cfg *config.WebSocketConfig) *Hub {
+	settings := NewWebSocketSettings(cfg)
+	
+	broadcastBuffer := defaultBroadcastBuffer
+	if cfg != nil && cfg.BroadcastBuffer > 0 {
+		broadcastBuffer = cfg.BroadcastBuffer
+	}
+
 	return &Hub{
 		clients:    make(map[*Client]bool),
-		broadcast:  make(chan []byte, 256),
+		broadcast:  make(chan []byte, broadcastBuffer),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		settings:   settings,
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/OldStager01/cloud-autoscaler/pkg/config"
 	"github.com/OldStager01/cloud-autoscaler/pkg/database/queries"
 	"github.com/gin-gonic/gin"
 )
@@ -12,20 +13,68 @@ import (
 type MetricsHandler struct {
 	metricsRepo *queries.MetricsRepository
 	eventsRepo  *queries.ScalingEventRepository
+	clusterRepo *queries.ClusterRepository
+	config      *config.APIConfig
 }
 
-func NewMetricsHandler(metricsRepo *queries.MetricsRepository, eventsRepo *queries.ScalingEventRepository) *MetricsHandler {
+func NewMetricsHandler(metricsRepo *queries.MetricsRepository, eventsRepo *queries.ScalingEventRepository, clusterRepo *queries.ClusterRepository, cfg *config.APIConfig) *MetricsHandler {
 	return &MetricsHandler{
 		metricsRepo: metricsRepo,
-		eventsRepo:   eventsRepo,
+		eventsRepo:  eventsRepo,
+		clusterRepo: clusterRepo,
+		config:      cfg,
 	}
+}
+
+// verifyClusterOwnership checks if the authenticated user owns the cluster
+func (h *MetricsHandler) verifyClusterOwnership(c *gin.Context, clusterID string) bool {
+	userID, ok := getUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		return false
+	}
+
+	cluster, err := h.clusterRepo.GetByID(c.Request.Context(), clusterID)
+	if err != nil {
+		if err == queries.ErrClusterNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return false
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify cluster ownership"})
+		return false
+	}
+
+	if cluster.UserID == nil || *cluster.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return false
+	}
+
+	return true
+}
+
+func (h *MetricsHandler) getDefaultLimit() int {
+	if h.config != nil && h.config.DefaultLimit > 0 {
+		return h.config.DefaultLimit
+	}
+	return 100
+}
+
+func (h *MetricsHandler) getMaxLimit() int {
+	if h.config != nil && h.config.MaxLimit > 0 {
+		return h.config.MaxLimit
+	}
+	return 1000
 }
 
 func (h *MetricsHandler) GetMetrics(c *gin.Context) {
 	clusterID := c.Param("id")
 
+	if !h.verifyClusterOwnership(c, clusterID) {
+		return
+	}
+
 	from, to := h.parseTimeRange(c)
-	limit := h.parseLimit(c, 100)
+	limit := h.parseLimit(c, h.getDefaultLimit())
 	aggregated := c.Query("aggregated") == "true"
 	bucketMinutes := h.parseInt(c.Query("bucket"), 5)
 
@@ -67,6 +116,11 @@ func (h *MetricsHandler) GetMetrics(c *gin.Context) {
 
 func (h *MetricsHandler) GetLatestMetrics(c *gin.Context) {
 	clusterID := c.Param("id")
+
+	if !h.verifyClusterOwnership(c, clusterID) {
+		return
+	}
+
 	ctx := c.Request.Context()
 
 	metrics, err := h.metricsRepo.GetLatest(ctx, clusterID)
@@ -85,6 +139,11 @@ func (h *MetricsHandler) GetLatestMetrics(c *gin.Context) {
 
 func (h *MetricsHandler) GetHourlyMetrics(c *gin.Context) {
 	clusterID := c.Param("id")
+
+	if !h.verifyClusterOwnership(c, clusterID) {
+		return
+	}
+
 	from, to := h.parseTimeRange(c)
 	ctx := c.Request.Context()
 
@@ -105,6 +164,11 @@ func (h *MetricsHandler) GetHourlyMetrics(c *gin.Context) {
 
 func (h *MetricsHandler) GetScalingEvents(c *gin.Context) {
 	clusterID := c.Param("id")
+
+	if !h.verifyClusterOwnership(c, clusterID) {
+		return
+	}
+
 	from, to := h.parseTimeRange(c)
 	limit := h.parseLimit(c, 50)
 	ctx := c.Request.Context()
@@ -126,6 +190,11 @@ func (h *MetricsHandler) GetScalingEvents(c *gin.Context) {
 
 func (h *MetricsHandler) GetScalingStats(c *gin.Context) {
 	clusterID := c.Param("id")
+
+	if !h.verifyClusterOwnership(c, clusterID) {
+		return
+	}
+
 	from, to := h.parseTimeRange(c)
 	ctx := c.Request.Context()
 
@@ -139,10 +208,16 @@ func (h *MetricsHandler) GetScalingStats(c *gin.Context) {
 }
 
 func (h *MetricsHandler) GetRecentEvents(c *gin.Context) {
+	userID, ok := getUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		return
+	}
+
 	limit := h.parseLimit(c, 20)
 	ctx := c.Request.Context()
 
-	events, err := h.eventsRepo.GetRecent(ctx, limit)
+	events, err := h.eventsRepo.GetRecentByUserID(ctx, userID, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch recent events"})
 		return
@@ -180,12 +255,13 @@ func (h *MetricsHandler) parseTimeRange(c *gin.Context) (time.Time, time.Time) {
 }
 
 func (h *MetricsHandler) parseLimit(c *gin.Context, defaultLimit int) int {
+	maxLimit := h.getMaxLimit()
 	limit := defaultLimit
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
 			limit = parsed
-			if limit > 1000 {
-				limit = 1000
+			if limit > maxLimit {
+				limit = maxLimit
 			}
 		}
 	}

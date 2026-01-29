@@ -25,12 +25,13 @@ type Cluster struct {
 	MaxServers    int            `json:"max_servers"`
 	Status        ClusterStatus  `json:"status"`
 	Config        *ClusterConfig `json:"config,omitempty"`
+	UserID        *int           `json:"user_id,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 	LastScaleTime *time.Time     `json:"last_scale_time,omitempty"`
 }
 
-func NewCluster(name string, minServers, maxServers int) *Cluster {
+func NewCluster(name string, minServers, maxServers int, userID *int) *Cluster {
 	now := time.Now()
 	return &Cluster{
 		ID:          NewUUID(),
@@ -38,6 +39,7 @@ func NewCluster(name string, minServers, maxServers int) *Cluster {
 		MinServers: minServers,
 		MaxServers: maxServers,
 		Status:     ClusterStatusActive,
+		UserID:     userID,
 		CreatedAt:  now,
 		UpdatedAt:   now,
 	}

@@ -61,6 +61,7 @@ type ClusterResponse struct {
 	MaxServers int                   `json:"max_servers"`
 	Status     string                `json:"status"`
 	Config     *models.ClusterConfig `json:"config,omitempty"`
+	UserID     *int                  `json:"user_id,omitempty"`
 	CreatedAt  time.Time             `json:"created_at"`
 	UpdatedAt  time.Time             `json:"updated_at"`
 }
@@ -73,16 +74,33 @@ func toClusterResponse(c *models.Cluster) ClusterResponse {
 		MaxServers: c.MaxServers,
 		Status:      string(c.Status),
 		Config:     c.Config,
+		UserID:     c.UserID,
 		CreatedAt:  c.CreatedAt,
 		UpdatedAt:  c.UpdatedAt,
 	}
+}
+
+// getUserID extracts the authenticated user's ID from the context
+func getUserID(c *gin.Context) (int, bool) {
+	if uid, exists := c.Get("user_id"); exists {
+		if id, ok := uid.(int); ok {
+			return id, true
+		}
+	}
+	return 0, false
 }
 
 func (h *ClusterHandler) List(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	clusters, err := h.clusterRepo.GetAll(ctx)
+	userID, ok := getUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		return
+	}
+
+	clusters, err := h.clusterRepo.GetByUserID(ctx, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch clusters"})
 		return
@@ -105,6 +123,12 @@ func (h *ClusterHandler) Get(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
+	userID, ok := getUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		return
+	}
+
 	cluster, err := h.clusterRepo.GetByID(ctx, id)
 	if err != nil {
 		if err == queries.ErrClusterNotFound {
@@ -112,6 +136,12 @@ func (h *ClusterHandler) Get(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch cluster"})
+		return
+	}
+
+	// Check ownership
+	if cluster.UserID == nil || *cluster.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
 		return
 	}
 
@@ -140,7 +170,15 @@ func (h *ClusterHandler) Create(c *gin.Context) {
 		return
 	}
 
-	cluster := models.NewCluster(req.Name, req.MinServers, req.MaxServers)
+	// Get the authenticated user's ID from context
+	var userID *int
+	if uid, exists := c.Get("user_id"); exists {
+		if id, ok := uid.(int); ok {
+			userID = &id
+		}
+	}
+
+	cluster := models.NewCluster(req.Name, req.MinServers, req.MaxServers, userID)
 	cluster.Config = req.Config
 
 	if err := h.clusterRepo.Create(ctx, cluster); err != nil {
@@ -190,6 +228,12 @@ func (h *ClusterHandler) Update(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
+	userID, ok := getUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		return
+	}
+
 	cluster, err := h.clusterRepo.GetByID(ctx, id)
 	if err != nil {
 		if err == queries.ErrClusterNotFound {
@@ -197,6 +241,12 @@ func (h *ClusterHandler) Update(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch cluster"})
+		return
+	}
+
+	// Check ownership
+	if cluster.UserID == nil || *cluster.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
 		return
 	}
 
@@ -235,6 +285,28 @@ func (h *ClusterHandler) Delete(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
+
+	userID, ok := getUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		return
+	}
+
+	// Check ownership before deleting
+	cluster, err := h.clusterRepo.GetByID(ctx, id)
+	if err != nil {
+		if err == queries.ErrClusterNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch cluster"})
+		return
+	}
+
+	if cluster.UserID == nil || *cluster.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+		return
+	}
 
 	// Stop monitoring pipeline first
 	if h.clusterManager != nil {

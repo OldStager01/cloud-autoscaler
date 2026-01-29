@@ -23,6 +23,7 @@ type Claims struct {
 type Service struct {
 	secretKey     []byte
 	tokenDuration time.Duration
+	issuer        string
 }
 
 func NewService(secretKey string, tokenDuration time.Duration) *Service {
@@ -32,6 +33,21 @@ func NewService(secretKey string, tokenDuration time.Duration) *Service {
 	return &Service{
 		secretKey:     []byte(secretKey),
 		tokenDuration: tokenDuration,
+		issuer:        "cloud-autoscaler",
+	}
+}
+
+func NewServiceWithIssuer(secretKey string, tokenDuration time.Duration, issuer string) *Service {
+	if tokenDuration == 0 {
+		tokenDuration = 24 * time.Hour
+	}
+	if issuer == "" {
+		issuer = "cloud-autoscaler"
+	}
+	return &Service{
+		secretKey:     []byte(secretKey),
+		tokenDuration: tokenDuration,
+		issuer:        issuer,
 	}
 }
 
@@ -44,7 +60,7 @@ func (s *Service) GenerateToken(userID int, username string) (string, error) {
 			ExpiresAt: jwt.NewNumericDate(now.Add(s.tokenDuration)),
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
-			Issuer:    "cloud-autoscaler",
+			Issuer:    s.issuer,
 		},
 	}
 

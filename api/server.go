@@ -20,6 +20,7 @@ type Server struct {
 	router         *gin.Engine
 	httpServer     *http.Server
 	config         config.APIConfig
+	wsConfig       config.WebSocketConfig
 	db             *database.DB
 	authService    *auth.Service
 	wsHub          *websocket.Hub
@@ -27,7 +28,7 @@ type Server struct {
 	clusterManager handlers.ClusterManager
 }
 
-func NewServer(cfg config.APIConfig, db *database.DB, clusterManager handlers.ClusterManager) *Server {
+func NewServer(cfg config.APIConfig, wsConfig config.WebSocketConfig, db *database.DB, clusterManager handlers.ClusterManager) *Server {
 	if cfg.JWTSecret == "" || cfg.JWTSecret == "change-me-in-production" {
 		gin.SetMode(gin.DebugMode)
 	} else {
@@ -35,12 +36,23 @@ func NewServer(cfg config.APIConfig, db *database.DB, clusterManager handlers.Cl
 	}
 
 	router := gin.New()
-	authService := auth.NewService(cfg.JWTSecret, 24*time.Hour)
-	wsHub := websocket.NewHub()
+	
+	// Use JWT duration from config, with fallback
+	jwtDuration := cfg.JWTDuration
+	if jwtDuration == 0 {
+		jwtDuration = 24 * time.Hour
+	}
+	jwtIssuer := cfg.JWTIssuer
+	if jwtIssuer == "" {
+		jwtIssuer = "cloud-autoscaler"
+	}
+	authService := auth.NewServiceWithIssuer(cfg.JWTSecret, jwtDuration, jwtIssuer)
+	wsHub := websocket.NewHub(&wsConfig)
 
 	s := &Server{
 		router:         router,
 		config:         cfg,
+		wsConfig:       wsConfig,
 		db:             db,
 		authService:    authService,
 		wsHub:          wsHub,
@@ -65,7 +77,33 @@ func NewServer(cfg config.APIConfig, db *database.DB, clusterManager handlers.Cl
 
 func (s *Server) setupMiddleware() {
 	s.router.Use(gin.Recovery())
-	s.router.Use(middleware.CORS(middleware.DefaultCORSConfig()))
+	
+	// Use CORS config if provided, otherwise use defaults
+	corsConfig := middleware.CORSConfig{
+		AllowCredentials: s.config.CORS.AllowCredentials,
+	}
+	if len(s.config.CORS.AllowedOrigins) > 0 {
+		corsConfig.AllowOrigins = s.config.CORS.AllowedOrigins
+	} else {
+		corsConfig.AllowOrigins = []string{"*"}
+	}
+	if len(s.config.CORS.AllowedMethods) > 0 {
+		corsConfig.AllowMethods = s.config.CORS.AllowedMethods
+	} else {
+		corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+	}
+	if len(s.config.CORS.AllowedHeaders) > 0 {
+		corsConfig.AllowHeaders = s.config.CORS.AllowedHeaders
+	} else {
+		corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Trace-ID"}
+	}
+	if len(s.config.CORS.ExposedHeaders) > 0 {
+		corsConfig.ExposeHeaders = s.config.CORS.ExposedHeaders
+	} else {
+		corsConfig.ExposeHeaders = []string{"X-Trace-ID"}
+	}
+	
+	s.router.Use(middleware.CORS(corsConfig))
 	s.router.Use(middleware.RequestLogger())
 	s.router.Use(middleware.TraceID())
 
@@ -82,9 +120,9 @@ func (s *Server) setupRoutes() {
 
 	// Handlers
 	healthHandler := handlers.NewHealthHandler(s.db)
-	authHandler := handlers.NewAuthHandler(userRepo, s.authService)
+	authHandler := handlers.NewAuthHandler(userRepo, s.authService, &s.config)
 	clusterHandler := handlers.NewClusterHandler(clusterRepo, s.clusterManager)
-	metricsHandler := handlers.NewMetricsHandler(metricsRepo, eventsRepo)
+	metricsHandler := handlers.NewMetricsHandler(metricsRepo, eventsRepo, clusterRepo, &s.config)
 
 	// Public routes
 	s.router.GET("/health", healthHandler.Health)
@@ -92,6 +130,7 @@ func (s *Server) setupRoutes() {
 	s.router.GET("/health/live", healthHandler.Live)
 
 	// Auth routes
+	s.router.POST("/auth/register", authHandler.Register)
 	s.router.POST("/auth/login", authHandler.Login)
 
 	// WebSocket route
@@ -124,12 +163,17 @@ func (s *Server) setupRoutes() {
 func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.config.Port)
 
+	idleTimeout := s.config.IdleTimeout
+	if idleTimeout == 0 {
+		idleTimeout = 60 * time.Second
+	}
+
 	s.httpServer = &http.Server{
 		Addr:         addr,
 		Handler:      s.router,
 		ReadTimeout:  s.config.ReadTimeout,
 		WriteTimeout: s.config.WriteTimeout,
-		IdleTimeout:  60 * time.Second,
+		IdleTimeout:  idleTimeout,
 	}
 
 	return s.httpServer.ListenAndServe()

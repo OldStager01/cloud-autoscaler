@@ -2,6 +2,7 @@ app:
   name: cloud-autoscaler
   mode: development
   log_level: debug
+  shutdown_timeout: 30s
 
 database:
   host: localhost
@@ -11,12 +12,16 @@ database:
   password: password
   max_connections: 25
   ssl_mode: disable
+  conn_max_lifetime: 30m
+  conn_max_idle_time: 5m
+  ping_timeout: 10s
+  migration_timeout: 60s
 
 collector:
   type: http
   endpoint: http://localhost:9000/metrics
   interval: 5s
-  timeout: 5s
+  timeout: 3s
   retry_attempts: 3
   circuit_breaker:
     max_failures: 5
@@ -29,6 +34,8 @@ analyzer:
     memory_high: 85
   trend_window: 1m
   spike_threshold: 50
+  max_history_length: 30
+  critical_threshold: 95
 
 decision:
   cooldown_period: 30s
@@ -55,12 +62,50 @@ api:
   port: 8080
   read_timeout: 15s
   write_timeout: 15s
+  idle_timeout: 60s
   rate_limit: 100
   jwt_secret: dev-secret-key-not-for-production
+  jwt_duration: 24h
+  jwt_issuer: cloud-autoscaler
+  cookie_name: auth_token
+  cookie_max_age: 86400
+  cookie_path: "/"
+  cookie_secure: true
+  cookie_http_only: true
+  default_limit: 100
+  max_limit: 1000
+  cors:
+    allowed_origins:
+      - "*"
+    allowed_methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    allowed_headers:
+      - Origin
+      - Content-Type
+      - Accept
+      - Authorization
+      - X-Trace-ID
+    exposed_headers:
+      - X-Trace-ID
+    allow_credentials: true
 
 websocket:
   max_connections: 1000
   ping_interval: 30s
+  write_timeout: 10s
+  pong_timeout: 60s
+  max_message_size: 512
+  read_buffer_size: 1024
+  write_buffer_size: 1024
+  broadcast_buffer: 256
+  client_buffer: 256
+
+events:
+  buffer_size: 100
 
 prometheus:
   enabled: true

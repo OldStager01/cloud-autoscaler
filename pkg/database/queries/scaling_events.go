@@ -100,6 +100,44 @@ func (r *ScalingEventRepository) GetRecent(ctx context.Context, limit int) ([]Sc
 	return events, rows.Err()
 }
 
+// GetRecentByUserID returns recent scaling events only for clusters owned by the specified user
+func (r *ScalingEventRepository) GetRecentByUserID(ctx context.Context, userID int, limit int) ([]ScalingEventRecord, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	query := `
+		SELECT se.id, se.cluster_id::text, se.timestamp, se.action, se.servers_before, se.servers_after, 
+			   se.trigger_reason, se.prediction_used, se.confidence, se.status
+		FROM scaling_events se
+		INNER JOIN clusters c ON se.cluster_id = c.id
+		WHERE c.user_id = $1
+		ORDER BY se.timestamp DESC
+		LIMIT $2`
+
+	rows, err := r.db.QueryContext(ctx, query, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []ScalingEventRecord
+	for rows.Next() {
+		var e ScalingEventRecord
+		err := rows.Scan(
+			&e.ID, &e.ClusterID, &e.Timestamp, &e.Action,
+			&e.ServersBefore, &e.ServersAfter, &e.TriggerReason,
+			&e.PredictionUsed, &e.Confidence, &e.Status,
+		)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, e)
+	}
+
+	return events, rows.Err()
+}
+
 func (r *ScalingEventRepository) GetStats(ctx context.Context, clusterID string, from, to time.Time) (*ScalingStats, error) {
 	query := `
 		SELECT 

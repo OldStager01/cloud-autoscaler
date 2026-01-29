@@ -21,7 +21,7 @@ func NewClusterRepository(db *sql.DB) *ClusterRepository {
 
 func (r *ClusterRepository) GetAll(ctx context.Context) ([]*models.Cluster, error) {
 	query := `
-		SELECT id, name, min_servers, max_servers, status, config, created_at, updated_at 
+		SELECT id, name, min_servers, max_servers, status, config, user_id, created_at, updated_at 
 		FROM clusters 
 		ORDER BY created_at DESC`
 
@@ -45,7 +45,7 @@ func (r *ClusterRepository) GetAll(ctx context.Context) ([]*models.Cluster, erro
 
 func (r *ClusterRepository) GetByID(ctx context.Context, id string) (*models.Cluster, error) {
 	query := `
-		SELECT id, name, min_servers, max_servers, status, config, created_at, updated_at 
+		SELECT id, name, min_servers, max_servers, status, config, user_id, created_at, updated_at 
 		FROM clusters 
 		WHERE id = $1`
 
@@ -59,7 +59,7 @@ func (r *ClusterRepository) GetByID(ctx context.Context, id string) (*models.Clu
 
 func (r *ClusterRepository) GetByName(ctx context.Context, name string) (*models.Cluster, error) {
 	query := `
-		SELECT id, name, min_servers, max_servers, status, config, created_at, updated_at 
+		SELECT id, name, min_servers, max_servers, status, config, user_id, created_at, updated_at 
 		FROM clusters 
 		WHERE name = $1`
 
@@ -78,8 +78,8 @@ func (r *ClusterRepository) Create(ctx context.Context, cluster *models.Cluster)
 	}
 
 	query := `
-		INSERT INTO clusters (id, name, min_servers, max_servers, status, config) 
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO clusters (id, name, min_servers, max_servers, status, config, user_id) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING created_at, updated_at`
 
 	return r.db.QueryRowContext(ctx, query,
@@ -89,6 +89,7 @@ func (r *ClusterRepository) Create(ctx context.Context, cluster *models.Cluster)
 		cluster.MaxServers,
 		cluster.Status,
 		configJSON,
+		cluster.UserID,
 	).Scan(&cluster.CreatedAt, &cluster.UpdatedAt)
 }
 
@@ -134,6 +135,32 @@ func (r *ClusterRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// GetByUserID returns all clusters owned by a specific user
+func (r *ClusterRepository) GetByUserID(ctx context.Context, userID int) ([]*models.Cluster, error) {
+	query := `
+		SELECT id, name, min_servers, max_servers, status, config, user_id, created_at, updated_at 
+		FROM clusters 
+		WHERE user_id = $1
+		ORDER BY created_at DESC`
+
+	rows, err := r.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var clusters []*models.Cluster
+	for rows.Next() {
+		cluster, err := r.scanCluster(rows)
+		if err != nil {
+			return nil, err
+		}
+		clusters = append(clusters, cluster)
+	}
+
+	return clusters, rows.Err()
+}
+
 func (r *ClusterRepository) GetActiveCount(ctx context.Context) (int, error) {
 	query := `SELECT COUNT(*) FROM clusters WHERE status = 'active'`
 	var count int
@@ -153,6 +180,7 @@ func (r *ClusterRepository) scanCluster(rows *sql.Rows) (*models.Cluster, error)
 		&cluster.MaxServers,
 		&status,
 		&configJSON,
+		&cluster.UserID,
 		&cluster.CreatedAt,
 		&cluster.UpdatedAt,
 	)
@@ -181,6 +209,7 @@ func (r *ClusterRepository) scanClusterRow(row *sql.Row) (*models.Cluster, error
 		&cluster.MaxServers,
 		&status,
 		&configJSON,
+		&cluster.UserID,
 		&cluster.CreatedAt,
 		&cluster.UpdatedAt,
 	)

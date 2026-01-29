@@ -14,6 +14,7 @@ type Config struct {
 	MemoryHighThreshold float64
 	TrendWindow         time.Duration
 	SpikeThreshold      float64
+	MaxHistoryLength    int
 }
 
 type Analyzer struct {
@@ -45,11 +46,16 @@ func New(cfg Config) *Analyzer {
 	if cfg.SpikeThreshold == 0 {
 		cfg.SpikeThreshold = 50.0
 	}
+	
+	maxHistoryLen := cfg.MaxHistoryLength
+	if maxHistoryLen == 0 {
+		maxHistoryLen = 30
+	}
 
 	return &Analyzer{
-		config:         cfg,
+		config:        cfg,
 		history:       make(map[string][]metricsSnapshot),
-		maxHistoryLen: 30,
+		maxHistoryLen: maxHistoryLen,
 	}
 }
 

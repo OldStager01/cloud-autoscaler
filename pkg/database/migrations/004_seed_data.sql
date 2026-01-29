@@ -2,9 +2,9 @@
 -- Seed data for development and testing
 
 -- Insert default admin user (password: admin123)
--- Hash generated using bcrypt cost 10
+-- Hash generated using bcrypt cost 12
 INSERT INTO users (username, password_hash) 
-VALUES ('admin', '$2a$10$rQEY7FHCP.HbHJk3H8rWLuPbLDLGdMV3xKBcSJxkFGPTR.P5Dxhji')
+VALUES ('admin', '$2a$12$rnZzKVDo14rxjUmf5U4p8e/b6aUJ8z2njUUbEB6TObyhYRrw4FD.2')
 ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash;
 
 -- Insert sample clusters

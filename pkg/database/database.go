@@ -14,13 +14,16 @@ type DB struct {
 }
 
 type Config struct {
-	Host           string
-	Port           int
-	Name           string
-	User           string
-	Password       string
-	MaxConnections int
-	SSLMode        string
+	Host            string
+	Port            int
+	Name            string
+	User            string
+	Password        string
+	MaxConnections  int
+	SSLMode         string
+	ConnMaxLifetime time.Duration
+	ConnMaxIdleTime time.Duration
+	PingTimeout     time.Duration
 }
 
 func (c Config) DSN() string {
@@ -40,14 +43,27 @@ func New(cfg Config) (*DB, error) {
 		return nil, fmt.Errorf("failed to open database connection: %w", err)
 	}
 
-	// Configure connection pool
+	// Configure connection pool with configurable values
+	connMaxLifetime := cfg.ConnMaxLifetime
+	if connMaxLifetime == 0 {
+		connMaxLifetime = 30 * time.Minute
+	}
+	connMaxIdleTime := cfg.ConnMaxIdleTime
+	if connMaxIdleTime == 0 {
+		connMaxIdleTime = 5 * time.Minute
+	}
+	pingTimeout := cfg.PingTimeout
+	if pingTimeout == 0 {
+		pingTimeout = 10 * time.Second
+	}
+
 	db.SetMaxOpenConns(cfg.MaxConnections)
 	db.SetMaxIdleConns(cfg.MaxConnections / 2)
-	db.SetConnMaxLifetime(30 * time.Minute)
-	db.SetConnMaxIdleTime(5 * time.Minute)
+	db.SetConnMaxLifetime(connMaxLifetime)
+	db.SetConnMaxIdleTime(connMaxIdleTime)
 
 	// Verify connection
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {

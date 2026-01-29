@@ -36,10 +36,21 @@ type Orchestrator struct {
 func New(cfg *config.Config, db *database.DB) *Orchestrator {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	eventBus := events.NewEventBus(100)
+	// Use events buffer size from config, with fallback
+	eventsBufferSize := cfg.Events.BufferSize
+	if eventsBufferSize == 0 {
+		eventsBufferSize = 100
+	}
+	eventBus := events.NewEventBus(eventsBufferSize)
 
 	allEvents := eventBus.SubscribeAll()
 	eventLogger := events.NewEventLogger(db, allEvents)
+
+	// Use max history length from config
+	maxHistoryLen := cfg.Analyzer.MaxHistoryLength
+	if maxHistoryLen == 0 {
+		maxHistoryLen = 30
+	}
 
 	analyzerCfg := analyzer.Config{
 		CPUHighThreshold:    cfg.Analyzer.Thresholds.CPUHigh,
@@ -47,6 +58,7 @@ func New(cfg *config.Config, db *database.DB) *Orchestrator {
 		MemoryHighThreshold: cfg.Analyzer.Thresholds.MemoryHigh,
 		TrendWindow:         cfg.Analyzer.TrendWindow,
 		SpikeThreshold:      cfg.Analyzer.SpikeThreshold,
+		MaxHistoryLength:    maxHistoryLen,
 	}
 
 	decisionCfg := decision.Config{

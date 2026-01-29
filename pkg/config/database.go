@@ -6,12 +6,15 @@ import (
 
 func (d DatabaseConfig) ToDBConfig() database.Config {
 	return database.Config{
-		Host:           d.Host,
-		Port:           d.Port,
-		Name:           d.Name,
-		User:           d.User,
-		Password:       d.Password,
+		Host:            d.Host,
+		Port:            d.Port,
+		Name:            d.Name,
+		User:            d.User,
+		Password:        d.Password,
 		MaxConnections:  d.MaxConnections,
-		SSLMode:        d.SSLMode,
+		SSLMode:         d.SSLMode,
+		ConnMaxLifetime: d.ConnMaxLifetime,
+		ConnMaxIdleTime: d.ConnMaxIdleTime,
+		PingTimeout:     d.PingTimeout,
 	}
 }
