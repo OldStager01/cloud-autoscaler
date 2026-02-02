@@ -1,3 +1,22 @@
+// @title Cloud Autoscaler API
+// @version 1.0
+// @description A cloud infrastructure autoscaling service that monitors cluster metrics and automatically scales resources based on demand.
+// @termsOfService http://swagger.io/terms/
+
+// @contact.name API Support
+// @contact.email tanmaytambat01@gmail.com
+
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
+
+// @host localhost:8080
+// @BasePath /
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token.
+
 package main
 
 import (

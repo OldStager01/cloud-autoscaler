@@ -40,30 +40,30 @@ func NewClusterHandler(clusterRepo *queries.ClusterRepository, clusterManager Cl
 }
 
 type CreateClusterRequest struct {
-	Name       string                `json:"name" binding:"required,min=1,max=100"`
-	MinServers int                   `json:"min_servers" binding:"required,min=1"`
-	MaxServers int                   `json:"max_servers" binding:"required,min=1"`
+	Name       string                `json:"name" binding:"required,min=1,max=100" example:"production-cluster"`
+	MinServers int                   `json:"min_servers" binding:"required,min=1" example:"2"`
+	MaxServers int                   `json:"max_servers" binding:"required,min=1" example:"10"`
 	Config     *models.ClusterConfig `json:"config"`
 }
 
 type UpdateClusterRequest struct {
-	Name       string                `json:"name" binding:"omitempty,min=1,max=100"`
-	MinServers *int                  `json:"min_servers" binding:"omitempty,min=1"`
-	MaxServers *int                  `json:"max_servers" binding:"omitempty,min=1"`
-	Status     string                `json:"status" binding:"omitempty,oneof=active paused"`
+	Name       string                `json:"name" binding:"omitempty,min=1,max=100" example:"updated-cluster"`
+	MinServers *int                  `json:"min_servers" binding:"omitempty,min=1" example:"3"`
+	MaxServers *int                  `json:"max_servers" binding:"omitempty,min=1" example:"15"`
+	Status     string                `json:"status" binding:"omitempty,oneof=active paused" example:"active"`
 	Config     *models.ClusterConfig `json:"config"`
 }
 
 type ClusterResponse struct {
-	ID         string                `json:"id"`
-	Name       string                `json:"name"`
-	MinServers int                   `json:"min_servers"`
-	MaxServers int                   `json:"max_servers"`
-	Status     string                `json:"status"`
+	ID         string                `json:"id" example:"clstr_abc123"`
+	Name       string                `json:"name" example:"production-cluster"`
+	MinServers int                   `json:"min_servers" example:"2"`
+	MaxServers int                   `json:"max_servers" example:"10"`
+	Status     string                `json:"status" example:"active"`
 	Config     *models.ClusterConfig `json:"config,omitempty"`
-	UserID     *int                  `json:"user_id,omitempty"`
-	CreatedAt  time.Time             `json:"created_at"`
-	UpdatedAt  time.Time             `json:"updated_at"`
+	UserID     *int                  `json:"user_id,omitempty" example:"1"`
+	CreatedAt  time.Time             `json:"created_at" example:"2024-01-15T10:30:00Z"`
+	UpdatedAt  time.Time             `json:"updated_at" example:"2024-01-15T10:30:00Z"`
 }
 
 func toClusterResponse(c *models.Cluster) ClusterResponse {
@@ -90,6 +90,16 @@ func getUserID(c *gin.Context) (int, bool) {
 	return 0, false
 }
 
+// List godoc
+// @Summary List clusters
+// @Description Get all clusters owned by the authenticated user
+// @Tags Clusters
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} map[string]interface{} "List of clusters"
+// @Failure 401 {object} map[string]string "User not authenticated"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /clusters [get]
 func (h *ClusterHandler) List(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
@@ -117,6 +127,19 @@ func (h *ClusterHandler) List(c *gin.Context) {
 	})
 }
 
+// Get godoc
+// @Summary Get cluster
+// @Description Get a specific cluster by ID
+// @Tags Clusters
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Cluster ID"
+// @Success 200 {object} ClusterResponse "Cluster details"
+// @Failure 401 {object} map[string]string "User not authenticated"
+// @Failure 403 {object} map[string]string "Access denied"
+// @Failure 404 {object} map[string]string "Cluster not found"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /clusters/{id} [get]
 func (h *ClusterHandler) Get(c *gin.Context) {
 	id := c.Param("id")
 
@@ -135,6 +158,19 @@ func (h *ClusterHandler) Get(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
 			return
 		}
+// Create godoc
+// @Summary Create cluster
+// @Description Create a new cluster for the authenticated user
+// @Tags Clusters
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body CreateClusterRequest true "Cluster details"
+// @Success 201 {object} ClusterResponse "Cluster created successfully"
+// @Failure 400 {object} map[string]string "Invalid request body"
+// @Failure 409 {object} map[string]string "Cluster with this name already exists"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /clusters [post]
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch cluster"})
 		return
 	}
@@ -203,6 +239,22 @@ func (h *ClusterHandler) Create(c *gin.Context) {
 		})
 		scal.InitializeCluster(cluster.ID, cluster.MinServers)
 
+// Update godoc
+// @Summary Update cluster
+// @Description Update an existing cluster
+// @Tags Clusters
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Cluster ID"
+// @Param request body UpdateClusterRequest true "Fields to update"
+// @Success 200 {object} ClusterResponse "Cluster updated successfully"
+// @Failure 400 {object} map[string]string "Invalid request body"
+// @Failure 401 {object} map[string]string "User not authenticated"
+// @Failure 403 {object} map[string]string "Access denied"
+// @Failure 404 {object} map[string]string "Cluster not found"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /clusters/{id} [put]
 		if err := h.clusterManager.StartCluster(cluster, coll, scal); err != nil {
 			// Log error but don't fail the request - cluster is created
 			c.JSON(http.StatusCreated, gin.H{
@@ -251,6 +303,19 @@ func (h *ClusterHandler) Update(c *gin.Context) {
 	}
 
 	// Apply updates
+// Delete godoc
+// @Summary Delete cluster
+// @Description Delete a cluster by ID
+// @Tags Clusters
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Cluster ID"
+// @Success 200 {object} map[string]string "Cluster deleted successfully"
+// @Failure 401 {object} map[string]string "User not authenticated"
+// @Failure 403 {object} map[string]string "Access denied"
+// @Failure 404 {object} map[string]string "Cluster not found"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /clusters/{id} [delete]
 	if req.Name != "" {
 		cluster.Name = req.Name
 	}
@@ -342,6 +407,17 @@ func (h *ClusterHandler) deleteFromSimulator(clusterID string) {
 	}
 	defer resp.Body.Close()
 }
+// GetStatus godoc
+// @Summary Get cluster status
+// @Description Get the current status and server counts for a cluster
+// @Tags Clusters
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Cluster ID"
+// @Success 200 {object} map[string]interface{} "Cluster status with server counts"
+// @Failure 404 {object} map[string]string "Cluster not found"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /clusters/{id}/status [get]
 
 // createInSimulator creates a cluster in the simulator with the specified server count
 func (h *ClusterHandler) createInSimulator(clusterID string, serverCount int) {

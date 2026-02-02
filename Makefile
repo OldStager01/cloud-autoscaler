@@ -1,4 +1,4 @@
-.PHONY:  build run run-simulator test clean lint fmt help db-up db-down db-logs db-shell
+.PHONY:  build run run-simulator test clean lint fmt help db-up db-down db-logs db-shell swagger
 
 # Binary names
 AUTOSCALER_BINARY=bin/autoscaler
@@ -68,6 +68,10 @@ lint:
 fmt:
 	$(GOFMT) ./...
 	$(GOVET) ./...
+
+## swagger: Generate Swagger documentation
+swagger:
+	swag init -g cmd/autoscaler/main.go
 
 ## deps: Download dependencies
 deps:

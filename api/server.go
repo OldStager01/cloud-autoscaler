@@ -9,11 +9,14 @@ import (
 	"github.com/OldStager01/cloud-autoscaler/api/handlers"
 	"github.com/OldStager01/cloud-autoscaler/api/middleware"
 	"github.com/OldStager01/cloud-autoscaler/api/websocket"
+	_ "github.com/OldStager01/cloud-autoscaler/docs" // swagger docs
 	"github.com/OldStager01/cloud-autoscaler/internal/auth"
 	"github.com/OldStager01/cloud-autoscaler/pkg/config"
 	"github.com/OldStager01/cloud-autoscaler/pkg/database"
 	"github.com/OldStager01/cloud-autoscaler/pkg/database/queries"
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 type Server struct {
@@ -123,6 +126,9 @@ func (s *Server) setupRoutes() {
 	authHandler := handlers.NewAuthHandler(userRepo, s.authService, &s.config)
 	clusterHandler := handlers.NewClusterHandler(clusterRepo, s.clusterManager)
 	metricsHandler := handlers.NewMetricsHandler(metricsRepo, eventsRepo, clusterRepo, &s.config)
+
+	// Swagger documentation
+	s.router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// Public routes
 	s.router.GET("/health", healthHandler.Health)

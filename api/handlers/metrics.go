@@ -66,6 +66,25 @@ func (h *MetricsHandler) getMaxLimit() int {
 	return 1000
 }
 
+// GetMetrics godoc
+// @Summary Get cluster metrics
+// @Description Get metrics for a cluster with optional aggregation
+// @Tags Metrics
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Cluster ID"
+// @Param from query string false "Start time (RFC3339 format)" example:"2024-01-15T00:00:00Z"
+// @Param to query string false "End time (RFC3339 format)" example:"2024-01-15T23:59:59Z"
+// @Param range query string false "Relative time range (e.g., 1h, 24h, 7d)" example:"1h"
+// @Param limit query int false "Maximum number of results" default(100)
+// @Param aggregated query bool false "Return aggregated metrics" default(false)
+// @Param bucket query int false "Aggregation bucket size in minutes" default(5)
+// @Success 200 {object} map[string]interface{} "Metrics data"
+// @Failure 401 {object} map[string]string "User not authenticated"
+// @Failure 403 {object} map[string]string "Access denied"
+// @Failure 404 {object} map[string]string "Cluster not found"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /clusters/{id}/metrics [get]
 func (h *MetricsHandler) GetMetrics(c *gin.Context) {
 	clusterID := c.Param("id")
 
@@ -114,6 +133,19 @@ func (h *MetricsHandler) GetMetrics(c *gin.Context) {
 	})
 }
 
+// GetLatestMetrics godoc
+// @Summary Get latest metrics
+// @Description Get the most recent metrics for a cluster
+// @Tags Metrics
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Cluster ID"
+// @Success 200 {object} map[string]interface{} "Latest metrics"
+// @Failure 401 {object} map[string]string "User not authenticated"
+// @Failure 403 {object} map[string]string "Access denied"
+// @Failure 404 {object} map[string]string "No recent metrics found"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /clusters/{id}/metrics/latest [get]
 func (h *MetricsHandler) GetLatestMetrics(c *gin.Context) {
 	clusterID := c.Param("id")
 
@@ -137,6 +169,22 @@ func (h *MetricsHandler) GetLatestMetrics(c *gin.Context) {
 	c.JSON(http.StatusOK, metrics)
 }
 
+// GetHourlyMetrics godoc
+// @Summary Get hourly metrics
+// @Description Get hourly aggregated metrics for a cluster
+// @Tags Metrics
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Cluster ID"
+// @Param from query string false "Start time (RFC3339 format)"
+// @Param to query string false "End time (RFC3339 format)"
+// @Param range query string false "Relative time range (e.g., 1h, 24h, 7d)"
+// @Success 200 {object} map[string]interface{} "Hourly metrics data"
+// @Failure 401 {object} map[string]string "User not authenticated"
+// @Failure 403 {object} map[string]string "Access denied"
+// @Failure 404 {object} map[string]string "Cluster not found"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /clusters/{id}/metrics/hourly [get]
 func (h *MetricsHandler) GetHourlyMetrics(c *gin.Context) {
 	clusterID := c.Param("id")
 
@@ -162,6 +210,23 @@ func (h *MetricsHandler) GetHourlyMetrics(c *gin.Context) {
 	})
 }
 
+// GetScalingEvents godoc
+// @Summary Get scaling events
+// @Description Get scaling events for a cluster
+// @Tags Events
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Cluster ID"
+// @Param from query string false "Start time (RFC3339 format)"
+// @Param to query string false "End time (RFC3339 format)"
+// @Param range query string false "Relative time range (e.g., 1h, 24h, 7d)"
+// @Param limit query int false "Maximum number of results" default(50)
+// @Success 200 {object} map[string]interface{} "Scaling events"
+// @Failure 401 {object} map[string]string "User not authenticated"
+// @Failure 403 {object} map[string]string "Access denied"
+// @Failure 404 {object} map[string]string "Cluster not found"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /clusters/{id}/events [get]
 func (h *MetricsHandler) GetScalingEvents(c *gin.Context) {
 	clusterID := c.Param("id")
 
@@ -171,6 +236,22 @@ func (h *MetricsHandler) GetScalingEvents(c *gin.Context) {
 
 	from, to := h.parseTimeRange(c)
 	limit := h.parseLimit(c, 50)
+// GetScalingStats godoc
+// @Summary Get scaling statistics
+// @Description Get scaling statistics for a cluster
+// @Tags Events
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Cluster ID"
+// @Param from query string false "Start time (RFC3339 format)"
+// @Param to query string false "End time (RFC3339 format)"
+// @Param range query string false "Relative time range (e.g., 1h, 24h, 7d)"
+// @Success 200 {object} map[string]interface{} "Scaling statistics"
+// @Failure 401 {object} map[string]string "User not authenticated"
+// @Failure 403 {object} map[string]string "Access denied"
+// @Failure 404 {object} map[string]string "Cluster not found"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /clusters/{id}/events/stats [get]
 	ctx := c.Request.Context()
 
 	events, err := h.eventsRepo.GetByCluster(ctx, clusterID, from, to, limit)
@@ -191,6 +272,17 @@ func (h *MetricsHandler) GetScalingEvents(c *gin.Context) {
 func (h *MetricsHandler) GetScalingStats(c *gin.Context) {
 	clusterID := c.Param("id")
 
+// GetRecentEvents godoc
+// @Summary Get recent events
+// @Description Get recent scaling events across all clusters for the authenticated user
+// @Tags Events
+// @Produce json
+// @Security BearerAuth
+// @Param limit query int false "Maximum number of results" default(20)
+// @Success 200 {object} map[string]interface{} "Recent scaling events"
+// @Failure 401 {object} map[string]string "User not authenticated"
+// @Failure 500 {object} map[string]string "Internal server error"
+// @Router /events/recent [get]
 	if !h.verifyClusterOwnership(c, clusterID) {
 		return
 	}
