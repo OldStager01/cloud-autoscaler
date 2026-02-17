@@ -11,6 +11,7 @@ import (
 	"github.com/OldStager01/cloud-autoscaler/internal/scaler"
 	"github.com/OldStager01/cloud-autoscaler/pkg/database/queries"
 	"github.com/OldStager01/cloud-autoscaler/pkg/models"
+	"github.com/OldStager01/cloud-autoscaler/pkg/validation"
 	"github.com/gin-gonic/gin"
 )
 
@@ -191,8 +192,16 @@ func (h *ClusterHandler) Create(c *gin.Context) {
 		return
 	}
 
-	if req.MaxServers < req.MinServers {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "max_servers must be >= min_servers"})
+	// Sanitize and validate cluster name
+	req.Name = validation.SanitizeString(req.Name)
+	if err := validation.ValidateClusterName(req.Name); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate server counts
+	if err := validation.ValidateServerCount(req.MinServers, req.MaxServers); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 

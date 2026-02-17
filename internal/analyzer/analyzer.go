@@ -171,7 +171,12 @@ func (a *Analyzer) calculateTrend(clusterID string) models.Trend {
 	secondAvg := a.averageCPU(secondHalf)
 
 	diff := secondAvg - firstAvg
-	threshold := 3.0 // TODO: Make configurable
+	
+	// Use spike threshold / 10 as trend threshold, with a minimum of 2.0
+	threshold := a.config.SpikeThreshold / 10
+	if threshold < 2.0 {
+		threshold = 2.0
+	}
 
 	switch {
 	case diff > threshold: 

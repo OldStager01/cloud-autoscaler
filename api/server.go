@@ -81,6 +81,12 @@ func NewServer(cfg config.APIConfig, wsConfig config.WebSocketConfig, db *databa
 func (s *Server) setupMiddleware() {
 	s.router.Use(gin.Recovery())
 	
+	// Security headers - should be first
+	s.router.Use(middleware.SecurityHeaders())
+	
+	// Request size limit (10MB max)
+	s.router.Use(middleware.RequestSizeLimit(10 * 1024 * 1024))
+	
 	// Use CORS config if provided, otherwise use defaults
 	corsConfig := middleware.CORSConfig{
 		AllowCredentials: s.config.CORS.AllowCredentials,
@@ -136,8 +142,12 @@ func (s *Server) setupRoutes() {
 	s.router.GET("/health/live", healthHandler.Live)
 
 	// Auth routes
-	s.router.POST("/auth/register", authHandler.Register)
-	s.router.POST("/auth/login", authHandler.Login)
+	authGroup := s.router.Group("/auth")
+	authGroup.Use(middleware.AuthRateLimiter())
+	{
+		authGroup.POST("/register", authHandler.Register)
+		authGroup.POST("/login", authHandler.Login)
+	}
 
 	// WebSocket route
 	s.router.GET("/ws", websocket.ServeWebSocket(s.wsHub))

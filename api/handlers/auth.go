@@ -8,6 +8,7 @@ import (
 	"github.com/OldStager01/cloud-autoscaler/internal/auth"
 	"github.com/OldStager01/cloud-autoscaler/pkg/config"
 	"github.com/OldStager01/cloud-autoscaler/pkg/database/queries"
+	"github.com/OldStager01/cloud-autoscaler/pkg/validation"
 	"github.com/gin-gonic/gin"
 )
 
@@ -52,6 +53,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	// Sanitize and validate username
+	req.Username = validation.SanitizeString(req.Username)
+	if err := validation.ValidateUsername(req.Username); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -139,6 +147,19 @@ type RegisterResponse struct {
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Sanitize and validate username
+	req.Username = validation.SanitizeString(req.Username)
+	if err := validation.ValidateUsername(req.Username); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate password strength
+	if err := validation.ValidatePassword(req.Password); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

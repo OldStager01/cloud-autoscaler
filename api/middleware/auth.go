@@ -24,17 +24,16 @@ func JWTAuth(authService *auth.Service) gin.HandlerFunc {
 		header := c.GetHeader(AuthorizationHeader)
 		if header != "" {
 			if !strings.HasPrefix(header, BearerPrefix) {
-				// c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				// 	"error": "invalid authorization header format",
-				// })
-				// return
-			}else{
-				token = strings.TrimPrefix(header, BearerPrefix)
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+					"error": "invalid authorization header format, expected 'Bearer <token>'",
+				})
+				return
 			}
+			token = strings.TrimPrefix(header, BearerPrefix)
 		}
 
 		// If no Authorization header, try to get token from cookie
-		if token == ""  {
+		if token == "" {
 			cookieToken, err := c.Cookie(AuthCookieName)
 			if err == nil && cookieToken != "" {
 				token = cookieToken
@@ -48,6 +47,7 @@ func JWTAuth(authService *auth.Service) gin.HandlerFunc {
 			})
 			return
 		}
+		
 		claims, err := authService.ValidateToken(token)
 		if err != nil {
 			status := http.StatusUnauthorized

@@ -1,0 +1,112 @@
+app:
+  name: cloud-autoscaler
+  mode: production
+  log_level: info
+  shutdown_timeout: 30s
+
+database:
+  host: ${DB_HOST:-timescaledb}
+  port: ${DB_PORT:-5432}
+  name: ${DB_NAME:-autoscaler}
+  user: ${DB_USER:-admin}
+  password: ${DB_PASSWORD:?Database password required}
+  max_connections: 50
+  ssl_mode: require
+  conn_max_lifetime: 30m
+  conn_max_idle_time: 5m
+  ping_timeout: 10s
+  migration_timeout: 120s
+
+collector:
+  type: http
+  endpoint: ${COLLECTOR_ENDPOINT:-http://simulator:9000/metrics}
+  interval: 10s
+  timeout: 5s
+  retry_attempts: 3
+  circuit_breaker:
+    max_failures: 5
+    timeout: 60s
+
+analyzer:
+  thresholds:
+    cpu_high: 80
+    cpu_low: 30
+    memory_high: 85
+  trend_window: 2m
+  spike_threshold: 50
+  max_history_length: 50
+  critical_threshold: 95
+
+decision:
+  cooldown_period: 60s
+  scale_down_cooldown_period: 120s
+  sustained_high_duration: 60s
+  sustained_low_duration: 180s
+  emergency_cpu_threshold: 95
+  min_servers: 2
+  max_servers: 100
+  max_scale_step: 5
+
+predictor:
+  enabled: false
+  type: pattern_matching
+  forecast_window: 30m
+  min_confidence: 0.75
+
+scaler:
+  type: ${SCALER_TYPE:-simulator}
+  provision_time: 30s
+  drain_timeout: 30s
+
+api:
+  port: ${API_PORT:-8080}
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 120s
+  rate_limit: 60
+  jwt_secret: ${JWT_SECRET:?JWT secret required - must be at least 32 characters}
+  jwt_duration: 24h
+  jwt_issuer: cloud-autoscaler-production
+  cookie_name: auth_token
+  cookie_max_age: 86400
+  cookie_path: "/"
+  cookie_secure: true
+  cookie_http_only: true
+  default_limit: 50
+  max_limit: 500
+  cors:
+    allowed_origins:
+      - ${ALLOWED_ORIGIN:-https://yourdomain.com}
+    allowed_methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    allowed_headers:
+      - Origin
+      - Content-Type
+      - Accept
+      - Authorization
+      - X-Trace-ID
+    exposed_headers:
+      - X-Trace-ID
+    allow_credentials: true
+
+websocket:
+  max_connections: 500
+  ping_interval: 30s
+  write_timeout: 10s
+  pong_timeout: 60s
+  max_message_size: 1048576
+  read_buffer_size: 4096
+  write_buffer_size: 4096
+  broadcast_buffer: 512
+  client_buffer: 256
+
+prometheus:
+  enabled: true
+  port: 9090
+
+events:
+  buffer_size: 1000

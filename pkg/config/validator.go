@@ -77,8 +77,29 @@ func (c *Config) Validate() error {
 	if c.API.Port <= 0 || c.API.Port > 65535 {
 		errs = append(errs, errors.New("api.port must be between 1 and 65535"))
 	}
-	if c.App.Mode == "production" && c.API.JWTSecret == "change-me-in-production" {
-		errs = append(errs, errors.New("api.jwt_secret must be changed in production"))
+	
+	// Strict JWT secret validation for production
+	if c.App.Mode == "production" {
+		if c.API.JWTSecret == "" || c.API.JWTSecret == "change-me-in-production" || c.API.JWTSecret == "dev-secret-key-not-for-production" {
+			errs = append(errs, errors.New("api.jwt_secret must be a strong secret in production"))
+		}
+		if len(c.API.JWTSecret) < 32 {
+			errs = append(errs, errors.New("api.jwt_secret must be at least 32 characters in production"))
+		}
+		if !c.API.CookieSecure {
+			errs = append(errs, errors.New("api.cookie_secure must be true in production"))
+		}
+		if !c.API.CookieHTTPOnly {
+			errs = append(errs, errors.New("api.cookie_http_only must be true in production"))
+		}
+		if c.Database.SSLMode == "disable" {
+			errs = append(errs, errors.New("database.ssl_mode should not be disabled in production"))
+		}
+	}
+	
+	// Rate limiting validation
+	if c.API.RateLimit <= 0 {
+		errs = append(errs, errors.New("api.rate_limit must be positive"))
 	}
 
 	if len(errs) > 0 {
